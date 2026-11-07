@@ -1,0 +1,15 @@
+{
+  "name": "abeer-solar-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild app.js --bundle --minify --outfile=build/app.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}
