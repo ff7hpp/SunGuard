@@ -1,6 +1,8 @@
 import { isolate, panels as samples, states } from "./farm.js";
 import { mountScene } from "./scene.js";
 import { themes, validTheme } from "./theme.js";
+import { metricCatalog, selectedMetrics } from "./live-client.mjs";
+import { activitySubject } from "./activity.mjs";
 
 const $ = selector => document.querySelector(selector);
 const icons = {
@@ -22,7 +24,7 @@ const icons = {
 const icon = name => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
 document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
-const panels = samples.slice();
+let panels = samples.slice();
 const activity = [];
 const notes = new Map();
 const dialog = $("#panel-dialog");
@@ -32,6 +34,9 @@ let selected = null;
 let page = "overview";
 let view = "perspective";
 let scene;
+let liveSnapshot = null;
+let apiAvailable = false;
+let widgetIds = selectedMetrics(JSON.parse(localStorage.getItem("heliofield-metrics") || "[]"));
 
 const badge = status => `<span class="status ${status}">${states[status].mark} ${states[status].label}</span>`;
 const spark = (values, label, color = "currentColor") => {
@@ -112,15 +117,16 @@ function activeAlerts() {
 const curve = [9, 12, 23, 28, 47, 57, 78, 69, 88, 92, 85, 90, 80, 74, 71, 58, 62, 49, 35];
 
 function renderOverview() {
-  const power = panels.reduce((sum, panel) => sum + (panel.power ?? 0), 0) / 1000;
+  const summary = liveSnapshot?.summary;
+  const power = summary?.powerKw ?? panels.reduce((sum, panel) => sum + (panel.power ?? 0), 0) / 1000;
   const alerts = activeAlerts();
   $("#nav-alerts").textContent = alerts.length;
   $("#hotspot").hidden = panels[102].status !== "critical";
   $("#metrics").innerHTML = `
     <article class="paper metric production"><div class="metric-label">${icon("bolt")} Power output</div><div class="reading">${power.toFixed(1)} <small>kW</small></div><p>Current array output</p>${spark(curve, "Illustrative generation trend", "#a44525")}</article>
-    <article class="paper metric"><div class="metric-label">${icon("layers")} Array health</div><div class="reading">${panels.filter(panel => panel.status === "normal").length}<small> / 500</small></div><p>Modules in normal range</p><div class="progress"><span style="width:${panels.filter(panel => panel.status === "normal").length / 5}%"></span></div></article>
+    <article class="paper metric"><div class="metric-label">${icon("layers")} Array health</div><div class="reading">${summary?.normal ?? panels.filter(panel => panel.status === "normal").length}<small> / 500</small></div><p>Modules in normal range</p><div class="progress"><span style="width:${(summary?.normal ?? panels.filter(panel => panel.status === "normal").length) / 5}%"></span></div></article>
     <article class="paper metric"><div class="metric-label">${icon("bell")} Active alerts</div><div class="reading">${alerts.length}<small> open</small></div><p>${alerts.filter(panel => panel.status === "critical").length} critical · ${alerts.filter(panel => panel.status === "warning").length} warnings</p><button class="text-button" data-open="alerts">Inspect alerts ${icon("arrow")}</button></article>
-    <article class="paper metric"><div class="metric-label">${icon("sun")} Field conditions</div><div class="reading">31<small> °C</small></div><p>Ambient temperature</p><div class="environment"><span><b>860</b> W/m² irradiance</span><span><b>18</b> km/h wind</span></div></article>`;
+    <article class="paper metric"><div class="metric-label">${icon("sun")} Field conditions</div><div class="reading">${summary?.averageTemperature ?? 31}<small> °C</small></div><p>Average panel temperature</p><div class="environment"><span><b>860</b> W/m² irradiance</span><span><b>${apiAvailable ? "LIVE" : "DEMO"}</b> telemetry</span></div></article>`;
   $("#overview-alerts").innerHTML = `<div class="paper-head"><div><p class="eyebrow">FIELD EVENTS</p><h2>Needs attention</h2></div><button class="text-button" data-open="alerts">All alerts ${icon("arrow")}</button></div>${alertRows(alerts.slice(0, 3))}`;
 }
 
@@ -153,8 +159,7 @@ function navigate(next) {
     $("#title").textContent = next === "map" ? "Solar map" : "Farm overview";
     $("#title").focus({ preventScroll: true });
   } else {
-    const body = next === "analytics" ? `
-      <article class="paper analysis"><div class="paper-head"><div><p class="eyebrow">GENERATION / DEMO HISTORY</p><h2>Array production</h2></div><div class="ranges" aria-label="Chart period"><button data-range="1" aria-pressed="true">1 day</button><button data-range="3" aria-pressed="false">3 days</button><button data-range="7" aria-pressed="false">7 days</button></div></div><div id="history-chart">${history(1)}</div></article>`
+    const body = next === "analytics" ? renderAnalytics()
       : next === "alerts" ? `<article class="paper alert-section"><div class="paper-head"><h2>Active alerts</h2></div>${alertRows(activeAlerts())}</article>`
       : `<article class="paper alert-section"><div class="paper-head"><h2>Session events</h2></div><div id="activity-rows"></div></article>`;
     $("#subpage").innerHTML = `<header class="intro"><div><p class="eyebrow section-tag">OPERATIONS / ${title.toUpperCase()}</p><h1 tabindex="-1">${title}</h1><p>${{ analytics: "Review illustrative generation trends across time.", alerts: "Inspect modules that need attention.", activity: "Review simulated actions and maintenance changes." }[next]}</p></div></header>${body}`;
@@ -162,6 +167,63 @@ function navigate(next) {
     $("#subpage h1").focus({ preventScroll: true });
   }
   window.scrollTo(0, 0);
+}
+
+function metricValue(id) {
+  const summary = liveSnapshot?.summary ?? {};
+  const total = panels.length || 500;
+  const available = panels.filter(panel => panel.power !== null);
+  const average = field => Math.round(available.reduce((sum, panel) => sum + (panel[field] ?? 0), 0) / Math.max(available.length, 1) * 10) / 10;
+  return {
+    power: `${(summary.powerKw ?? panels.reduce((sum, panel) => sum + (panel.power ?? 0), 0) / 1000).toFixed(1)} kW`,
+    temperature: `${summary.averageTemperature ?? average("temperature")} °C`,
+    voltage: `${average("voltage")} V`, current: `${average("current")} A`, efficiency: `${summary.averageEfficiency ?? average("efficiency")} %`,
+    irradiance: "860 W/m²", frequency: "50.0 Hz", availability: `${Math.round(available.length / total * 100)} %`,
+    alerts: `${activeAlerts().length} open`,
+  }[id];
+}
+
+function renderAnalytics() {
+  const widgets = widgetIds.map(id => {
+    const metric = metricCatalog.find(item => item.id === id);
+    return `<article class="paper metric analysis-widget"><div class="metric-label">${metric.label}</div><div class="reading">${metricValue(id)}</div><p>${metric.level} · live snapshot</p></article>`;
+  }).join("");
+  const catalog = metricCatalog.map(metric => `<button class="metric-choice" data-metric="${metric.id}" aria-pressed="${widgetIds.includes(metric.id)}"><strong>${widgetIds.includes(metric.id) ? "✓" : "+"} ${metric.label}</strong><small>${metric.level} · ${metric.unit}</small></button>`).join("");
+  const scenarios = ["normal", "dust", "overheat", "shading", "inverter", "missing"].map(name => `<button data-scenario="${name}" aria-pressed="${liveSnapshot?.scenario === name}">${name}</button>`).join("");
+  return `<article class="paper analysis"><div class="paper-head"><div><p class="eyebrow">LIVE ANALYSIS / CUSTOM DASHBOARD</p><h2>Your analytics</h2></div><span class="live-state ${apiAvailable ? "online" : "offline"}">${apiAvailable ? "● SQLite simulator connected" : "○ Static demo fallback"}</span></div><p class="context">Choose only the readings this farm needs. Current telemetry updates every minute; hourly summaries are calculated from saved readings.</p><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><div class="scenario-controls"><strong>Simulation scenarios</strong><span>${scenarios}</span><button data-tick="true">Advance one minute</button></div></article>`;
+}
+
+async function syncLiveData() {
+  try {
+    const response = await fetch("/api/snapshot", { cache: "no-store" });
+    if (!response.ok) throw new Error("snapshot unavailable");
+    liveSnapshot = await response.json();
+    panels = liveSnapshot.panels;
+    apiAvailable = true;
+    panels.forEach(panel => { updateTile(panel); scene?.update(panel); });
+    const time = new Date(liveSnapshot.generatedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    $(".snapshot strong").innerHTML = `${time} <em>LOCAL</em>`;
+    $(".demo-tag").innerHTML = "<i></i> Live simulator";
+    renderOverview();
+    if (page === "analytics") navigate("analytics");
+  } catch {
+    apiAvailable = false;
+    $(".demo-tag").innerHTML = "<i></i> Demo fallback";
+  }
+}
+
+async function commandSimulation(scenario) {
+  try {
+    const response = await fetch(scenario ? "/api/scenarios" : "/api/tick", scenario ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario }) } : { method: "POST" });
+    if (!response.ok) throw new Error("simulation command failed");
+    liveSnapshot = await response.json();
+    panels = liveSnapshot.panels;
+    apiAvailable = true;
+    panels.forEach(panel => { updateTile(panel); scene?.update(panel); });
+    log(`Simulation ${scenario ?? "advanced one minute"}`);
+    renderOverview();
+    navigate("analytics");
+  } catch { apiAvailable = false; }
 }
 
 function history(days) {
@@ -181,7 +243,7 @@ function renderActivity() {
 }
 
 function log(action) {
-  activity.unshift({ time: new Date().toLocaleTimeString("en-GB"), panel: panels[selected].id, action });
+  activity.unshift({ time: new Date().toLocaleTimeString("en-GB"), panel: activitySubject(selected, panels), action });
 }
 
 function openPanel(index) {
@@ -255,7 +317,7 @@ function refresh() {
   renderPanel();
 }
 
-document.addEventListener("click", event => {
+document.addEventListener("click", async event => {
   const button = event.target.closest("button");
   if (!button) return;
   const { panel, open, page: target, range } = button.dataset;
@@ -265,6 +327,15 @@ document.addEventListener("click", event => {
     document.querySelectorAll("[data-range]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
     $("#history-chart").innerHTML = history(Number(range));
   }
+  if (button.dataset.metric) {
+    const metric = button.dataset.metric;
+    widgetIds = widgetIds.includes(metric) ? widgetIds.filter(id => id !== metric) : [...widgetIds, metric];
+    widgetIds = selectedMetrics(widgetIds);
+    localStorage.setItem("heliofield-metrics", JSON.stringify(widgetIds));
+    navigate("analytics");
+  }
+  if (button.dataset.scenario) await commandSimulation(button.dataset.scenario);
+  if (button.dataset.tick) await commandSimulation();
 });
 function applyTheme(value) {
   const theme = validTheme(value);
@@ -280,3 +351,5 @@ document.querySelectorAll(".theme-switcher [data-theme]").forEach(button => {
 applyTheme(validTheme(localStorage.getItem("heliofield-theme")));
 $("#close-panel").onclick = () => dialog.close();
 renderOverview();
+syncLiveData();
+setInterval(syncLiveData, 15_000);

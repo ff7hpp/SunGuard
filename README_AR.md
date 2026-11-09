@@ -22,6 +22,16 @@ npm.cmd run build
 
 مصدر المشهد في `scene.js` والبيانات التجريبية في `farm.js`. البناء ينشئ مجلد `dist/` الجاهز للنشر، ويكفي إغلاق صفحة المتصفح لإيقاف النموذج.
 
+## المحاكي الحي المحلي
+
+```powershell
+npm.cmd run simulate
+```
+
+ثم افتح `http://127.0.0.1:4173/`. ينشئ المحاكي قاعدة SQLite محلية في `data/heliopulse.db` (لا تُرفع إلى Git)، ويحتوي 500 لوحاً وقراءة جديدة كل دقيقة. من صفحة **Analytics** يمكن اختيار Widgets وتشغيل سيناريوهات: `normal` و`dust` و`overheat` و`shading` و`inverter` و`missing`.
+
+> نسخة Vercel هي واجهة Static فقط؛ ستعرض **Demo fallback** لأن SQLite والمحاكي يحتاجان runtime محلياً أو backend مستضافاً منفصلاً. لا تدّعي النسخة المنشورة وجود قاعدة بيانات حية.
+
 ## وثائق المشروع
 
 - [وثيقة الاكتشاف والمواصفات الأولية](docs/01_DISCOVERY_SPEC_AR.md)

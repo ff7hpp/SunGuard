@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "simulate": "npm run build && node server/server.mjs"
   },
   "dependencies": {
     "three": "0.180.0"
