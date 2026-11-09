@@ -1,7 +1,7 @@
 import { isolate, panels as samples, states } from "./farm.js";
 import { mountScene } from "./scene.js";
 import { themes, validTheme } from "./theme.js";
-import { metricCatalog, selectedMetrics } from "./live-client.mjs";
+import { lifecycleProgress, metricCatalog, selectedMetrics } from "./live-client.mjs";
 import { activitySubject } from "./activity.mjs";
 
 const $ = selector => document.querySelector(selector);
@@ -190,7 +190,10 @@ function renderAnalytics() {
   }).join("");
   const catalog = metricCatalog.map(metric => `<button class="metric-choice" data-metric="${metric.id}" aria-pressed="${widgetIds.includes(metric.id)}"><strong>${widgetIds.includes(metric.id) ? "✓" : "+"} ${metric.label}</strong><small>${metric.level} · ${metric.unit}</small></button>`).join("");
   const scenarios = ["normal", "dust", "overheat", "shading", "inverter", "missing"].map(name => `<button data-scenario="${name}" aria-pressed="${liveSnapshot?.scenario === name}">${name}</button>`).join("");
-  return `<article class="paper analysis"><div class="paper-head"><div><p class="eyebrow">LIVE ANALYSIS / CUSTOM DASHBOARD</p><h2>Your analytics</h2></div><span class="live-state ${apiAvailable ? "online" : "offline"}">${apiAvailable ? "● SQLite simulator connected" : "○ Static demo fallback"}</span></div><p class="context">Choose only the readings this farm needs. Current telemetry updates every minute; hourly summaries are calculated from saved readings.</p><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><div class="scenario-controls"><strong>Simulation scenarios</strong><span>${scenarios}</span><button data-tick="true">Advance one minute</button></div></article>`;
+  const lifecycle = liveSnapshot?.lifecycle;
+  const progress = lifecycleProgress(lifecycle);
+  const events = lifecycle?.events?.slice(-3).reverse().map(event => `<li><b>${event.step}/15</b> · ${event.message}</li>`).join("") || "<li>No lifecycle events yet.</li>";
+  return `<article class="paper analysis"><div class="paper-head"><div><p class="eyebrow">LIVE ANALYSIS / CUSTOM DASHBOARD</p><h2>Your analytics</h2></div><span class="live-state ${apiAvailable ? "online" : "offline"}">${apiAvailable ? "● SQLite simulator connected" : "○ Static demo fallback"}</span></div><p class="context">Choose only the readings this farm needs. Current telemetry updates every minute; hourly summaries are calculated from saved readings.</p><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><section class="lifecycle"><div><p class="eyebrow">SIMULATED YEAR / 15 MINUTES</p><h3>${lifecycle?.active ? lifecycle.label : "Lifecycle simulator"}</h3><p>${progress.current} of ${progress.total} simulated periods complete · ${lifecycle?.active ? "next update within one minute" : "ready to start"}</p></div><button class="primary-button" data-lifecycle-start="true" ${!apiAvailable || lifecycle?.active ? "disabled" : ""}>Start 15-minute simulation</button><div class="lifecycle-bar" aria-label="Lifecycle progress"><span style="width:${progress.percent}%"></span></div><ol class="lifecycle-events">${events}</ol></section><div class="scenario-controls"><strong>Manual scenario controls</strong><span>${scenarios}</span><button data-tick="true">Advance one minute</button></div></article>`;
 }
 
 async function syncLiveData() {
@@ -221,6 +224,20 @@ async function commandSimulation(scenario) {
     apiAvailable = true;
     panels.forEach(panel => { updateTile(panel); scene?.update(panel); });
     log(`Simulation ${scenario ?? "advanced one minute"}`);
+    renderOverview();
+    navigate("analytics");
+  } catch { apiAvailable = false; }
+}
+
+async function startLifecycle() {
+  try {
+    const response = await fetch("/api/lifecycle/start", { method: "POST" });
+    if (!response.ok) throw new Error("lifecycle start failed");
+    liveSnapshot = await response.json();
+    panels = liveSnapshot.panels;
+    apiAvailable = true;
+    panels.forEach(panel => { updateTile(panel); scene?.update(panel); });
+    log("Started 15-minute simulated lifecycle");
     renderOverview();
     navigate("analytics");
   } catch { apiAvailable = false; }
@@ -336,6 +353,7 @@ document.addEventListener("click", async event => {
   }
   if (button.dataset.scenario) await commandSimulation(button.dataset.scenario);
   if (button.dataset.tick) await commandSimulation();
+  if (button.dataset.lifecycleStart) await startLifecycle();
 });
 function applyTheme(value) {
   const theme = validTheme(value);

@@ -47,3 +47,16 @@ test("the dust scenario degrades a deterministic zone and creates an alert", () 
     assert.ok(snapshot.alerts.some(alert => alert.code === "SOIL-01"));
   });
 });
+
+test("a lifecycle run advances through persisted fault and recovery events", () => {
+  withSimulation(simulation => {
+    simulation.startLifecycle();
+    simulation.advanceLifecycle();
+    simulation.advanceLifecycle();
+    const snapshot = simulation.advanceLifecycle();
+    assert.equal(snapshot.lifecycle.active, true);
+    assert.equal(snapshot.lifecycle.step, 3);
+    assert.equal(snapshot.scenario, "dust");
+    assert.ok(snapshot.lifecycle.events.some(event => event.kind === "fault" && event.scenario === "dust"));
+  });
+});

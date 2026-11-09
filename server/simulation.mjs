@@ -3,6 +3,23 @@ import { DatabaseSync } from "node:sqlite";
 const PANEL_COUNT = 500;
 const MINUTE = 60_000;
 const scenarioNames = ["normal", "dust", "overheat", "shading", "inverter", "missing"];
+const lifecyclePhases = [
+  { scenario: "normal", kind: "baseline", label: "Baseline monitoring" },
+  { scenario: "normal", kind: "baseline", label: "Stable generation" },
+  { scenario: "dust", kind: "fault", label: "Dust accumulation detected" },
+  { scenario: "dust", kind: "fault", label: "Dust impact increasing" },
+  { scenario: "normal", kind: "maintenance", label: "Cleaning completed" },
+  { scenario: "shading", kind: "fault", label: "Partial shading detected" },
+  { scenario: "shading", kind: "fault", label: "Shading impact monitored" },
+  { scenario: "normal", kind: "maintenance", label: "Shading issue cleared" },
+  { scenario: "inverter", kind: "fault", label: "Inverter-zone degradation" },
+  { scenario: "inverter", kind: "maintenance", label: "Inverter inspection applied" },
+  { scenario: "normal", kind: "recovery", label: "Production recovered" },
+  { scenario: "overheat", kind: "fault", label: "High temperature risk" },
+  { scenario: "overheat", kind: "maintenance", label: "Thermal inspection applied" },
+  { scenario: "normal", kind: "recovery", label: "Temperature normalised" },
+  { scenario: "missing", kind: "fault", label: "Telemetry loss detected" },
+];
 
 function panelAddress(index) {
   return { id: `R${String(Math.floor(index / 25) + 1).padStart(2, "0")}-C${String(index % 25 + 1).padStart(2, "0")}`, row: Math.floor(index / 25) + 1, col: index % 25 + 1 };
@@ -49,6 +66,7 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
     CREATE TABLE IF NOT EXISTS readings (id INTEGER PRIMARY KEY, panel_index INTEGER NOT NULL, captured_at TEXT NOT NULL, power_w REAL, temperature_c REAL, voltage_v REAL, current_a REAL, efficiency_pct REAL, status TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS readings_panel_time ON readings(panel_index, captured_at DESC);
     CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY, code TEXT NOT NULL, severity TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL, active INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS lifecycle_events (id INTEGER PRIMARY KEY, step INTEGER NOT NULL, scenario TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL, captured_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
   const getMeta = db.prepare("SELECT value FROM metadata WHERE key = ?");
@@ -61,15 +79,22 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
   const activeAlerts = db.prepare("SELECT code, severity, message, created_at AS createdAt FROM alerts WHERE active = 1 ORDER BY id DESC");
   const clearAlerts = db.prepare("UPDATE alerts SET active = 0 WHERE active = 1");
   const insertAlert = db.prepare("INSERT INTO alerts(code, severity, message, created_at, active) VALUES (?, ?, ?, ?, 1)");
+  const eventRows = db.prepare("SELECT step, scenario, kind, message, captured_at AS capturedAt FROM lifecycle_events ORDER BY id");
+  const insertEvent = db.prepare("INSERT INTO lifecycle_events(step, scenario, kind, message, captured_at) VALUES (?, ?, ?, ?, ?)");
+  const clearEvents = db.prepare("DELETE FROM lifecycle_events");
 
   let currentTime = new Date(getMeta.get("generatedAt")?.value ?? now().toISOString());
   let tickNumber = Number(getMeta.get("tickNumber")?.value ?? 0);
   let scenario = getMeta.get("scenario")?.value ?? "normal";
+  let lifecycleStep = Number(getMeta.get("lifecycleStep")?.value ?? 0);
+  let lifecycleActive = getMeta.get("lifecycleActive")?.value === "1";
 
   function persistState() {
     setMeta.run("generatedAt", currentTime.toISOString());
     setMeta.run("tickNumber", String(tickNumber));
     setMeta.run("scenario", scenario);
+    setMeta.run("lifecycleStep", String(lifecycleStep));
+    setMeta.run("lifecycleActive", lifecycleActive ? "1" : "0");
   }
 
   function writeReadings() {
@@ -140,8 +165,35 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
     },
     snapshot() {
       const panels = panelRows.all();
-      return { generatedAt: currentTime.toISOString(), scenario, panels, summary: summary(panels), alerts: activeAlerts.all(), readingCount: readingCount.get().count, telemetryIntervalSeconds: 60, analyticsIntervalSeconds: 3600 };
+      const currentPhase = lifecyclePhases[Math.max(0, lifecycleStep - 1)];
+      return { generatedAt: currentTime.toISOString(), scenario, panels, summary: summary(panels), alerts: activeAlerts.all(), readingCount: readingCount.get().count, telemetryIntervalSeconds: 60, analyticsIntervalSeconds: 3600, lifecycle: { active: lifecycleActive, step: lifecycleStep, total: lifecyclePhases.length, label: lifecycleStep ? currentPhase.label : "Lifecycle ready", events: eventRows.all() } };
     },
+    startLifecycle() {
+      lifecycleStep = 0;
+      lifecycleActive = true;
+      scenario = "normal";
+      clearAlerts.run();
+      clearEvents.run();
+      persistState();
+      return this.snapshot();
+    },
+    advanceLifecycle() {
+      if (!lifecycleActive) return this.snapshot();
+      const phase = lifecyclePhases[lifecycleStep];
+      scenario = phase.scenario;
+      clearAlerts.run();
+      const alert = messageFor(scenario);
+      if (alert) insertAlert.run(alert.code, alert.severity, alert.message, currentTime.toISOString());
+      insertEvent.run(lifecycleStep + 1, scenario, phase.kind, phase.label, currentTime.toISOString());
+      currentTime = new Date(currentTime.getTime() + MINUTE);
+      tickNumber += 1;
+      appendReadings();
+      lifecycleStep += 1;
+      if (lifecycleStep === lifecyclePhases.length) lifecycleActive = false;
+      persistState();
+      return this.snapshot();
+    },
+    scheduledTick() { return lifecycleActive ? this.advanceLifecycle() : this.tick(); },
     close() { db.close(); },
     scenarios: scenarioNames,
   };

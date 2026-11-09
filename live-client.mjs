@@ -15,3 +15,9 @@ export function selectedMetrics(candidate) {
   const selected = Array.isArray(candidate) ? candidate.filter(id => available.has(id)) : [];
   return selected.length ? [...new Set(selected)] : ["power", "temperature", "alerts"];
 }
+
+export function lifecycleProgress(lifecycle) {
+  const total = Number(lifecycle?.total) || 15;
+  const current = Math.max(0, Math.min(Number(lifecycle?.step) || 0, total));
+  return { current, total, percent: Math.round(current / total * 100) };
+}

@@ -24,7 +24,7 @@ async function readJson(request) {
 export function createServer({ databasePath = resolve(projectDirectory, "data", "heliopulse.db"), staticDirectory = resolve(projectDirectory, "dist"), tickMs = 60_000 } = {}) {
   mkdirSync(dirname(databasePath), { recursive: true });
   const simulation = createSimulation({ databasePath });
-  const timer = setInterval(() => simulation.tick(), tickMs);
+  const timer = setInterval(() => simulation.scheduledTick(), tickMs);
   timer.unref();
   const server = createHttpServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -38,7 +38,9 @@ export function createServer({ databasePath = resolve(projectDirectory, "data", 
         try { return sendJson(response, 200, simulation.activateScenario(body.scenario)); }
         catch { return sendJson(response, 400, { error: "unknown scenario" }); }
       }
-      if (request.method === "POST" && url.pathname === "/api/tick") return sendJson(response, 200, simulation.tick());
+      if (request.method === "POST" && url.pathname === "/api/lifecycle/start") return sendJson(response, 200, simulation.startLifecycle());
+      if (request.method === "POST" && url.pathname === "/api/lifecycle/advance") return sendJson(response, 200, simulation.advanceLifecycle());
+      if (request.method === "POST" && url.pathname === "/api/tick") return sendJson(response, 200, simulation.scheduledTick());
       if (request.method !== "GET" && request.method !== "HEAD") return sendJson(response, 405, { error: "method not allowed" });
 
       const requestedPath = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
