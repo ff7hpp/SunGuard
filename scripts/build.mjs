@@ -13,6 +13,10 @@ export async function buildStaticSite({ outputDirectory = resolve(projectDirecto
     bundle: true,
     entryPoints: [resolve(projectDirectory, "app.js")],
     minify: true,
+    define: {
+      "process.env.NEXT_PUBLIC_SUPABASE_URL": JSON.stringify(process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""),
+      "process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": JSON.stringify(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? ""),
+    },
     outfile: resolve(outputDirectory, "app.js"),
   });
 
