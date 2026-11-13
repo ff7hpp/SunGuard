@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { snapshotFromRows, historyFromRows, parsePanelNumber } from './neon-data.mjs';
 import { renderHistory } from '../history-charts.mjs';
+import { databaseUrl } from './neon-db.mjs';
+
+test('SunGuard-specific database configuration takes precedence', () => {
+  assert.equal(databaseUrl({ SUNGUARD_DATABASE_URL: 'selected', DATABASE_URL: 'other' }), 'selected');
+  assert.equal(databaseUrl({ DATABASE_URL: 'fallback' }), 'fallback');
+});
 
 test('snapshot preserves imported values and represents missing panels as offline', () => {
   const snapshot = snapshotFromRows('2026-10-01T06:00:00.000Z', [{ panel_id: 1, voltage: 6.2375, current: .112, power: .687520953389545, temperature: 22.5, lux: 2756, ambient: 22.14215502497602, fault: 'normal', status: 'normal' }]);

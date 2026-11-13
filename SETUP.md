@@ -8,4 +8,4 @@
 
 For an empty, explicitly selected database only, run `npm run neon:migrate`. To import an authorized CSV, run `npm run neon:import -- <path-to-csv>`. Verify its source and timezone first. The CSV is not part of the repository. Do not rerun imports merely to check the data; use read-only queries.
 
-Vercel requires server-side `DATABASE_URL` for each target environment. Push an integration branch and verify a preview's frontend and API against the intended Neon branch before merging or deploying production. A successful Git push does not confirm deployment or environment configuration.
+Vercel uses the server-side `SUNGUARD_DATABASE_URL` when set, falling back to `DATABASE_URL`. The SunGuard-specific variable avoids overriding Neon-managed variables; set it for each verified target environment. Push an integration branch and verify a preview's frontend and API against the intended Neon branch before merging or deploying production. A successful Git push does not confirm deployment or environment configuration.

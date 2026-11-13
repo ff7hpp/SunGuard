@@ -25,7 +25,7 @@ async function readJson(request) {
 export function createServer({ databasePath = resolve(projectDirectory, "data", "sunguard.db"), staticDirectory = resolve(projectDirectory, "dist"), tickMs = 1_000, seedHistory = false, now = () => new Date(), provider } = {}) {
   mkdirSync(dirname(databasePath), { recursive: true });
   const simulation = createSimulation({ databasePath, now, provider });
-  const remote = process.env.DATABASE_URL ? import('./neon-db.mjs') : null;
+  const remote = (process.env.SUNGUARD_DATABASE_URL || process.env.DATABASE_URL) ? import('./neon-db.mjs') : null;
   let simulationPreview = false;
   if (seedHistory && !remote) simulation.seedHistory();
   let lastMinute;

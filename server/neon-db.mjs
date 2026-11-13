@@ -3,9 +3,10 @@ import { attachDatabasePool } from '@vercel/functions';
 import { snapshotFromRows, historyFromRows } from './neon-data.mjs';
 
 let pool;
+export const databaseUrl = (env = process.env) => env.SUNGUARD_DATABASE_URL || env.DATABASE_URL;
 function db() {
-  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is not configured');
-  if (!pool) { pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 5 }); attachDatabasePool(pool); }
+  if (!databaseUrl()) throw new Error('Database URL is not configured');
+  if (!pool) { pool = new pg.Pool({ connectionString: databaseUrl(), max: 5 }); attachDatabasePool(pool); }
   return pool;
 }
 const status = `CASE WHEN fault IN ('hot_panel','open_circuit') THEN 'critical' WHEN fault = 'normal' THEN 'normal' ELSE 'warning' END`;

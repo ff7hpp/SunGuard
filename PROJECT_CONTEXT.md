@@ -8,7 +8,7 @@ SunGuard is an academic solar-operations interface for 300 panels in 20 rows and
 - `api/[...route].js` provides read-only Vercel functions backed by pooled Neon PostgreSQL. `server/neon-db.mjs` implements snapshot, seven-day aggregate, incident and panel-history queries.
 - `server/server.mjs` serves the same historical data locally when `DATABASE_URL` exists. Its separate SQLite simulator supports scenario and lifecycle previews. The Vercel endpoints do not currently run the simulator.
 - `db/001_sunguard.sql` defines the isolated `sunguard` schema. `scripts/neon-import.mjs` imports CSV in a transaction, checks conflicts and verifies all rows. Existing records are not overwritten.
-- Neon project: `shy-paper-01481036`, branch: `production`. Keep all connection strings in server-side environment variables.
+- Neon project: `shy-paper-01481036`, branch: `production`. Keep all connection strings in server-side environment variables. `SUNGUARD_DATABASE_URL` takes precedence over `DATABASE_URL` so the selected branch is explicit.
 
 The CSV times are interpreted as Europe/Istanbul; their original wall-clock timestamps and exact decimal values are retained. Fault labels are mapped to warning or critical; missing panel readings appear as no signal. Lux is presented as illuminance, not irradiance. Efficiency and frequency are absent from the CSV and shown as unavailable. Imported readings are historical and must not be presented as live measurements.
 
