@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { lifecycleProgress, metricCatalog, selectedMetrics } from "./live-client.mjs";
+import { lifecycleProgress, metricCatalog, selectedMetrics, formatMetric } from "./live-client.mjs";
+
+test("metric summaries round measured values while preserving missing data", () => {
+  assert.equal(formatMetric(22.108287545787547), "22.1");
+  assert.equal(formatMetric(null), "—");
+});
 
 test("analysis catalog provides nine metrics and preserves a focused default", () => {
   assert.equal(metricCatalog.length, 9);

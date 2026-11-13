@@ -1,7 +1,7 @@
 import { isolate, panels as samples, states } from "./farm.js";
 import { mountScene } from "./scene.js";
 import { themes, validTheme } from "./theme.js";
-import { lifecycleProgress, metricCatalog, selectedMetrics } from "./live-client.mjs";
+import { lifecycleProgress, metricCatalog, selectedMetrics, formatMetric } from "./live-client.mjs";
 import { renderHistory, renderSimulationCharts } from "./history-charts.mjs";
 import { activitySubject } from "./activity.mjs";
 import { COLUMNS, PANEL_COUNT, HOTSPOT_INDEX } from "./grid.js";
@@ -40,6 +40,7 @@ let page = "overview";
 let view = "perspective";
 let scene;
 let liveSnapshot = null;
+let hasImported = false;
 let apiAvailable = false;
 let historyDate = "";
 let historyRequest = 0;
@@ -137,7 +138,7 @@ function renderOverview() {
     <article class="paper metric production"><div class="metric-label">${icon("bolt")} Power output</div><div class="reading">${power.toFixed(1)} <small>kW</small></div><p>Output at displayed sample time</p>${imported ? '<button class="text-button" data-open="analytics">View recorded history</button>' : spark(curve, "Illustrative generation trend", "#a44525")}</article>
     <article class="paper metric"><div class="metric-label">${icon("layers")} Array health</div><div class="reading">${healthy}<small> / ${PANEL_COUNT}</small></div><p>Modules in normal range</p><div class="progress"><span style="width:${healthy / PANEL_COUNT * 100}%"></span></div></article>
     <article class="paper metric"><div class="metric-label">${icon("bell")} Active alerts</div><div class="reading">${alerts.length}<small> open</small></div><p>${alerts.filter(panel => panel.status === "critical").length} critical · ${alerts.filter(panel => panel.status === "warning").length} warnings</p><button class="text-button" data-open="alerts">Inspect alerts ${icon("arrow")}</button></article>
-    <article class="paper metric"><div class="metric-label">${icon("sun")} Field conditions</div><div class="reading">${summary?.averageTemperature ?? (imported ? "—" : 31)}<small> °C</small></div><p>Average panel temperature</p><div class="environment"><span>${imported ? "Imported telemetry" : "Simulated telemetry"}</span></div></article>`;
+    <article class="paper metric"><div class="metric-label">${icon("sun")} Field conditions</div><div class="reading">${Number.isFinite(summary?.averageTemperature) ? summary.averageTemperature.toFixed(1) : (imported ? "—" : 31)}<small> °C</small></div><p>Average panel temperature</p><div class="environment"><span>${imported ? "Imported telemetry" : "Simulated telemetry"}</span></div></article>`;
   $("#overview-alerts").innerHTML = `<div class="paper-head"><div><p class="eyebrow">FIELD EVENTS</p><h2>Needs attention</h2></div><button class="text-button" data-open="alerts">All alerts ${icon("arrow")}</button></div>${alertRows(alerts.slice(0, 3))}`;
 }
 
@@ -177,7 +178,7 @@ function navigate(next) {
     const body = next === "analytics" ? renderAnalytics()
       : next === "alerts" ? `<article class="paper alert-section"><div class="paper-head"><h2>Active alerts</h2></div>${alertRows(activeAlerts())}</article>`
       : `<article class="paper alert-section"><div class="paper-head"><h2>Session events</h2></div><div id="activity-rows"></div></article>`;
-    $("#subpage").innerHTML = `<header class="intro"><div><p class="eyebrow section-tag">OPERATIONS / ${title.toUpperCase()}</p><h1 tabindex="-1">${title}</h1><p>${{ analytics: "Inspect scheduled telemetry and run scenario previews.", alerts: "Inspect modules that need attention.", activity: "Review simulated actions and maintenance changes." }[next]}</p></div></header>${next === "analytics" ? analyticsChartsShell() : ""}${body}`;
+    $("#subpage").innerHTML = `<header class="intro"><div><p class="eyebrow section-tag">OPERATIONS / ${title.toUpperCase()}</p><h1 tabindex="-1">${title}</h1><p>${{ analytics: "Inspect scheduled telemetry and run scenario previews.", alerts: "Inspect modules that need attention.", activity: "Review simulated actions and maintenance changes." }[next]}</p></div></header>${body}${next === "analytics" ? analyticsChartsShell() : ""}`;
     if (next === "analytics") {
       historyLoaded = false;
       updateChartView();
@@ -210,7 +211,7 @@ function updateChartView() {
     button.setAttribute("aria-pressed", String((button.dataset.chartView === "simulation") === simulationView));
   }
   const lifecycle = liveSnapshot?.lifecycle;
-  $("#start-chart-simulation").disabled = !apiAvailable || Boolean(lifecycle?.active);
+  $("#start-chart-simulation").disabled = !apiAvailable || Boolean(lifecycle?.active) || liveSnapshot?.simulationAvailable === false;
   if (simulationView) $("#simulation-charts").innerHTML = renderSimulationCharts(lifecycle);
 }
 
@@ -263,8 +264,8 @@ function metricValue(id) {
   };
   return {
     power: `${(panels.reduce((sum, panel) => sum + (panel.power ?? 0), 0) / 1000).toFixed(1)} kW`,
-    temperature: `${summary.averageTemperature ?? average("temperature")} °C`,
-    voltage: `${average("voltage")} V`, current: `${average("current")} A`, efficiency: `${summary.averageEfficiency ?? average("efficiency")} %`,
+    temperature: `${formatMetric(summary.averageTemperature ?? average("temperature"))} °C`,
+    voltage: `${average("voltage")} V`, current: `${average("current")} A`, efficiency: `${formatMetric(summary.averageEfficiency ?? average("efficiency"))} %`,
     irradiance: `${liveSnapshot?.site?.irradiance ?? "—"} W/m²`, frequency: `${liveSnapshot?.site?.frequency ?? "—"} Hz`, availability: `${Math.round(available.length / total * 100)} %`,
     alerts: `${activeAlerts().length} open`,
   }[id];
@@ -276,11 +277,11 @@ function renderAnalytics() {
     return `<article class="paper metric analysis-widget"><div class="metric-label">${metric.label}</div><div class="reading">${metricValue(id)}</div><p>${metric.level} · live snapshot</p></article>`;
   }).join("");
   const catalog = metricCatalog.map(metric => `<button class="metric-choice" data-metric="${metric.id}" aria-pressed="${widgetIds.includes(metric.id)}"><strong>${widgetIds.includes(metric.id) ? "✓" : "+"} ${metric.label}</strong><small>${metric.level} · ${metric.unit}</small></button>`).join("");
-  const scenarios = ["normal", "dust", "overheat", "shading", "inverter", "missing"].map(name => `<button data-scenario="${name}" aria-pressed="${liveSnapshot?.scenario === name}">${name}</button>`).join("");
+  const scenarios = ["normal", "dust", "overheat", "shading", "inverter", "missing"].map(name => `<button ${liveSnapshot?.simulationAvailable === false ? "disabled" : ""} data-scenario="${name}" aria-pressed="${liveSnapshot?.scenario === name}">${name}</button>`).join("");
   const lifecycle = liveSnapshot?.lifecycle;
   const progress = lifecycleProgress(lifecycle);
   const events = lifecycle?.events?.slice().reverse().map(event => `<li><b>${event.step}/15</b> · ${event.message}</li>`).join("") || "<li>No lifecycle events yet.</li>";
-  return `<article class="paper analysis"><div class="paper-head"><div><p class="eyebrow">${liveSnapshot?.collection?.imported ? 'IMPORTED TELEMETRY' : 'SIMULATED TELEMETRY'}</p><h2>Your analytics</h2></div><span class="live-state ${apiAvailable ? "online" : "offline"}">${apiAvailable ? "● SQLite connected" : "○ Static demo fallback"}</span></div><p class="context">${liveSnapshot?.collection?.imported ? 'Browse the imported measurements above. Scenario previews use simulated data.' : 'Scheduled samples are collected every minute from 09:00 to 17:30 Istanbul time. Scenario previews run separately.'}</p><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><section class="lifecycle"><div><p class="eyebrow">SIMULATED YEAR / 1 MINUTE</p><h3>${lifecycle?.active ? lifecycle.label : "Lifecycle simulator"}</h3><p>${progress.current} of ${progress.total} simulated periods complete · ${lifecycle?.active ? "next update within 4 seconds" : "ready to start"}</p></div><button class="primary-button" data-lifecycle-start="true" ${!apiAvailable || lifecycle?.active ? "disabled" : ""}>Start 1-minute simulation</button><div class="lifecycle-bar" aria-label="Lifecycle progress"><span style="width:${progress.percent}%"></span></div><ol class="lifecycle-events">${events}</ol></section><div class="scenario-controls"><strong>Manual scenario controls</strong><span>${scenarios}</span><button data-tick="true">Advance one minute</button><button data-collection="true" ${!liveSnapshot?.collection?.latestSample || lifecycle?.active ? "disabled" : ""}>Show latest saved sample</button><p id="simulation-feedback" role="status"></p></div></article>`;
+  return `<article class="paper analysis"><div class="paper-head"><div><p class="eyebrow">${liveSnapshot?.collection?.imported ? 'IMPORTED TELEMETRY' : 'SIMULATED TELEMETRY'}</p><h2>Your analytics</h2></div><span class="live-state ${apiAvailable ? "online" : "offline"}">${apiAvailable ? (liveSnapshot?.storage === "neon" ? "● Neon connected" : "● SQLite connected") : "○ Static demo fallback"}</span></div><p class="context">${liveSnapshot?.collection?.imported ? 'Browse the imported measurements above. Scenario previews are available in the local simulator.' : 'Scheduled samples are collected every minute from 09:00 to 17:30 Istanbul time. Scenario previews run separately.'}</p><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><section class="lifecycle"><div><p class="eyebrow">SIMULATED YEAR / 1 MINUTE</p><h3>${lifecycle?.active ? lifecycle.label : "Lifecycle simulator"}</h3><p>${progress.current} of ${progress.total} simulated periods complete · ${lifecycle?.active ? "next update within 4 seconds" : "ready to start"}</p></div><button class="primary-button" data-lifecycle-start="true" ${!apiAvailable || lifecycle?.active || liveSnapshot?.simulationAvailable === false ? "disabled" : ""}>Start 1-minute simulation</button><div class="lifecycle-bar" aria-label="Lifecycle progress"><span style="width:${progress.percent}%"></span></div><ol class="lifecycle-events">${events}</ol></section><div class="scenario-controls"><strong>Manual scenario controls</strong><span>${scenarios}</span><button data-tick="true" ${liveSnapshot?.simulationAvailable === false ? "disabled" : ""}>Advance one minute</button><button data-collection="true" ${(!liveSnapshot?.collection?.latestSample && !hasImported) || lifecycle?.active || liveSnapshot?.simulationAvailable === false ? "disabled" : ""}>Show latest saved sample</button><p id="simulation-feedback" role="status"></p></div></article>`;
 }
 
 async function syncLiveData() {
@@ -292,12 +293,14 @@ async function syncLiveData() {
     const snapshot = await response.json();
     if (snapshot.panels.length !== PANEL_COUNT) throw new Error("Unexpected panel count");
     liveSnapshot = snapshot;
+    hasImported ||= Boolean(snapshot.collection?.imported);
     panels = snapshot.panels.map(panel => isolated.has(panel.id) ? isolate(panel) : panel);
     apiAvailable = true;
     if (page === "analytics" && (!previouslyAvailable ||
       previousSnapshot?.collection?.latestSample !== snapshot.collection?.latestSample ||
       previousSnapshot?.collection?.revision !== snapshot.collection?.revision ||
       previousSnapshot?.collection?.localDate !== snapshot.collection?.localDate)) void loadHistory();
+    $(".snapshot small").textContent = snapshot.collection?.imported ? "RECORDED SAMPLE" : "SIMULATION SNAPSHOT";
     const time = new Date(snapshot.generatedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
     $(".snapshot strong").innerHTML = `${time} <em>TRT</em>`;
     $(".demo-tag").textContent = snapshot.mode === "preview" ? "Simulation preview"
@@ -411,11 +414,33 @@ function renderPanel() {
     <dl class="detail-readings"><div><dt>Output</dt><dd>${reading(panel.power, "W")}</dd></div><div><dt>Temperature</dt><dd>${reading(panel.temperature, "°C")}</dd></div><div><dt>DC voltage</dt><dd>${reading(panel.voltage, "V")}</dd></div><div><dt>DC current</dt><dd>${reading(panel.current ?? null, "A")}</dd></div></dl>
     ${panel.fault ? `<p class="context">Ambient temperature: ${reading(panel.ambient, "°C")} · Illuminance: ${reading(panel.lux, "lux")}</p>`
       : '<p class="context">Field context · simulated telemetry</p>'}
+    ${liveSnapshot?.collection?.imported ? '<details id="panel-history"><summary>Recent recorded readings</summary><p class="context" id="panel-history-content">Open to load the latest 30 readings.</p></details>' : ''}
     <h3>Maintenance note</h3>
     <p id="saved-note" class="context">${note ? "" : "No note saved."}</p>
     <form id="note-form"><label for="note">Note for this module</label><textarea id="note" required maxlength="240" rows="2"></textarea><div class="actions"><button type="submit">${note ? "Update note" : "Add note"}</button>${note ? '<button type="button" id="delete-note">Delete note</button>' : ""}</div></form>
     <h3>Virtual control</h3>
     <form id="control-form"><label for="reason">Reason for isolation</label><input id="reason" maxlength="120" required placeholder="e.g. Inspect module temperature" ${!available || panel.status === "isolated" ? "disabled" : ""}><button class="primary-button" ${!available || panel.status === "isolated" ? "disabled" : ""}>Simulate isolation</button></form>`;
+  const historical = $("#panel-history");
+  if (historical) historical.ontoggle = async () => {
+    if (!historical.open || historical.dataset.loaded) return;
+    const content = historical.querySelector("#panel-history-content");
+    content.textContent = "Loading recorded readings…";
+    try {
+      const response = await fetch(`/api/panel-history?panel=${panel.index + 1}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("History unavailable");
+      const data = await response.json();
+      if (!historical.isConnected) return;
+      content.replaceChildren();
+      if (!data.readings.length) content.textContent = "No recorded readings for this panel.";
+      for (const item of data.readings) {
+        const row = document.createElement("span");
+        row.style.display = "block";
+        row.textContent = `${new Date(item.time).toLocaleString("en-GB", { timeZone: "Europe/Istanbul" })} TRT · ${item.power} W · ${item.temperature} °C · ${item.voltage} V · ${item.current} A · ${item.fault.replaceAll("_", " ")}`;
+        content.append(row);
+      }
+      historical.dataset.loaded = "true";
+    } catch { if (historical.isConnected) content.textContent = "Recorded readings unavailable. Close and reopen to retry."; }
+  };
   if (note) {
     $("#saved-note").textContent = note;
     $("#note").value = note;
