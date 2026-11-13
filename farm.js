@@ -1,3 +1,5 @@
+import { COLUMNS, PANEL_COUNT, HOTSPOT_INDEX } from "./grid.js";
+
 export const states = {
   normal: { label: "Normal", mark: "●", color: "#8fb2a6", surface: "#b4c8d3" },
   warning: { label: "Warning", mark: "▲", color: "#f2bb65", surface: "#ffc669" },
@@ -6,13 +8,13 @@ export const states = {
   isolated: { label: "Isolated", mark: "■", color: "#a9a0e7", surface: "#a9a0e7" }
 };
 
-export const panels = Array.from({ length: 500 }, (_, index) => {
-  const row = Math.floor(index / 25) + 1;
-  const col = index % 25 + 1;
+export const panels = Array.from({ length: PANEL_COUNT }, (_, index) => {
+  const row = Math.floor(index / COLUMNS) + 1;
+  const col = index % COLUMNS + 1;
   const id = `R${String(row).padStart(2, "0")}-C${String(col).padStart(2, "0")}`;
-  const status = index === 102 || index === 368 ? "critical"
-    : [28, 132, 223, 289, 435].includes(index) ? "warning"
-    : index === 487 ? "offline" : "normal";
+  const status = index === HOTSPOT_INDEX || index === 218 ? "critical"
+    : [28, 82, 133, 189, 235].includes(index) ? "warning"
+    : index === 287 ? "offline" : "normal";
   const missing = status === "offline";
   return {
     index, row, col, id, status,

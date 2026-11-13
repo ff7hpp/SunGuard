@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
+import { COLUMNS, PANEL_COUNT, HOTSPOT_INDEX } from "../grid.js";
+import { createTelemetry } from "./telemetry.mjs";
 
-const PANEL_COUNT = 500;
 const MINUTE = 60_000;
 const scenarioNames = ["normal", "dust", "overheat", "shading", "inverter", "missing"];
 const lifecyclePhases = [
@@ -22,15 +23,15 @@ const lifecyclePhases = [
 ];
 
 function panelAddress(index) {
-  return { id: `R${String(Math.floor(index / 25) + 1).padStart(2, "0")}-C${String(index % 25 + 1).padStart(2, "0")}`, row: Math.floor(index / 25) + 1, col: index % 25 + 1 };
+  return { id: `R${String(Math.floor(index / COLUMNS) + 1).padStart(2, "0")}-C${String(index % COLUMNS + 1).padStart(2, "0")}`, row: Math.floor(index / COLUMNS) + 1, col: index % COLUMNS + 1 };
 }
 
 function scenarioStatus(index, scenario) {
-  if (scenario === "dust" && index >= 100 && index < 125) return "warning";
-  if (scenario === "overheat" && [102, 368].includes(index)) return "critical";
-  if (scenario === "shading" && index >= 245 && index < 260) return "warning";
-  if (scenario === "inverter" && index >= 300 && index < 325) return "warning";
-  if (scenario === "missing" && [212, 487, 492].includes(index)) return "offline";
+  if (scenario === "dust" && index >= 60 && index < 75) return "warning";
+  if (scenario === "overheat" && [HOTSPOT_INDEX, 218].includes(index)) return "critical";
+  if (scenario === "shading" && index >= 145 && index < 160) return "warning";
+  if (scenario === "inverter" && index >= 180 && index < 195) return "warning";
+  if (scenario === "missing" && [112, 287, 292].includes(index)) return "offline";
   return "normal";
 }
 
@@ -58,7 +59,7 @@ function messageFor(scenario) {
   }[scenario];
 }
 
-export function createSimulation({ databasePath, now = () => new Date() }) {
+export function createSimulation({ databasePath, now = () => new Date(), provider }) {
   const db = new DatabaseSync(databasePath);
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -68,6 +69,8 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
     CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY, code TEXT NOT NULL, severity TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL, active INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS lifecycle_events (id INTEGER PRIMARY KEY, step INTEGER NOT NULL, scenario TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL, captured_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS scheduled_readings (panel_index INTEGER NOT NULL, captured_at TEXT NOT NULL, power_w REAL, temperature_c REAL, voltage_v REAL, current_a REAL, efficiency_pct REAL, status TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'simulated', PRIMARY KEY (panel_index, captured_at));
+    CREATE INDEX IF NOT EXISTS scheduled_readings_time ON scheduled_readings(captured_at, panel_index);
   `);
   const getMeta = db.prepare("SELECT value FROM metadata WHERE key = ?");
   const setMeta = db.prepare("INSERT INTO metadata(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
@@ -82,12 +85,15 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
   const eventRows = db.prepare("SELECT step, scenario, kind, message, captured_at AS capturedAt FROM lifecycle_events ORDER BY id");
   const insertEvent = db.prepare("INSERT INTO lifecycle_events(step, scenario, kind, message, captured_at) VALUES (?, ?, ?, ?, ?)");
   const clearEvents = db.prepare("DELETE FROM lifecycle_events");
+  const telemetry = createTelemetry(db, now, provider);
 
   let currentTime = new Date(getMeta.get("generatedAt")?.value ?? now().toISOString());
   let tickNumber = Number(getMeta.get("tickNumber")?.value ?? 0);
   let scenario = getMeta.get("scenario")?.value ?? "normal";
   let lifecycleStep = Number(getMeta.get("lifecycleStep")?.value ?? 0);
   let lifecycleActive = getMeta.get("lifecycleActive")?.value === "1";
+  let lifecycleSeries = JSON.parse(getMeta.get("lifecycleSeries")?.value ?? "[]");
+  let preview = lifecycleActive || (!telemetry.status().imported && getMeta.get("preview")?.value === "1");
 
   function persistState() {
     setMeta.run("generatedAt", currentTime.toISOString());
@@ -95,6 +101,8 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
     setMeta.run("scenario", scenario);
     setMeta.run("lifecycleStep", String(lifecycleStep));
     setMeta.run("lifecycleActive", lifecycleActive ? "1" : "0");
+    setMeta.run("lifecycleSeries", JSON.stringify(lifecycleSeries));
+    setMeta.run("preview", preview ? "1" : "0");
   }
 
   function writeReadings() {
@@ -135,10 +143,14 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
   function summary(panels) {
     const statuses = Object.groupBy(panels, panel => panel.status);
     const available = panels.filter(panel => panel.power !== null);
+    const average = field => {
+      const values = available.map(panel => panel[field]).filter(Number.isFinite);
+      return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length * 10) / 10 : null;
+    };
     return {
       powerKw: Math.round(available.reduce((sum, panel) => sum + panel.power, 0) / 100) / 10,
-      averageTemperature: Math.round(available.reduce((sum, panel) => sum + panel.temperature, 0) / Math.max(available.length, 1) * 10) / 10,
-      averageEfficiency: Math.round(available.reduce((sum, panel) => sum + panel.efficiency, 0) / Math.max(available.length, 1) * 10) / 10,
+      averageTemperature: average("temperature"),
+      averageEfficiency: average("efficiency"),
       normal: statuses.normal?.length ?? 0,
       warning: statuses.warning?.length ?? 0,
       critical: statuses.critical?.length ?? 0,
@@ -147,7 +159,20 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
   }
 
   return {
+    collectScheduled(at) { return telemetry.collect(at); },
+    collectionStatus() { return telemetry.status(); },
+    seedHistory() { telemetry.seed(); },
+    history(date) { return telemetry.history(date); },
+    ingest(batch) { return telemetry.ingest(batch); },
+    showCollection() {
+      if (!lifecycleActive) {
+        preview = false;
+        persistState();
+      }
+      return this.snapshot();
+    },
     tick() {
+      preview = true;
       currentTime = new Date(currentTime.getTime() + MINUTE);
       tickNumber += 1;
       appendReadings();
@@ -164,12 +189,25 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
       return this.snapshot();
     },
     snapshot() {
-      const panels = panelRows.all();
+      const collection = this.collectionStatus();
+      const useScheduled = !preview && Boolean(collection.latestSample);
+      const stored = useScheduled ? new Map(telemetry.panels(collection.latestSample).map(row => [row.panel, row])) : null;
+      const panels = stored ? Array.from({ length: PANEL_COUNT }, (_, index) => {
+        const { power = null, temperature = null, voltage = null, current = null, efficiency = null, status = "offline", quality = null, lux = null, ambient = null, fault = null } = stored.get(index) ?? {};
+        return { index, ...panelAddress(index), power, temperature, voltage, current, efficiency, status, quality, lux, ambient, fault };
+      }) : panelRows.all();
       const currentPhase = lifecyclePhases[Math.max(0, lifecycleStep - 1)];
-      return { generatedAt: currentTime.toISOString(), scenario, panels, summary: summary(panels), alerts: activeAlerts.all(), readingCount: readingCount.get().count, telemetryIntervalSeconds: 60, analyticsIntervalSeconds: 3600, lifecycle: { active: lifecycleActive, step: lifecycleStep, total: lifecyclePhases.length, label: lifecycleStep ? currentPhase.label : "Lifecycle ready", events: eventRows.all() } };
+      const site = useScheduled ? telemetry.latest() : null;
+      const alerts = useScheduled ? panels.filter(panel => ["warning", "critical", "offline"].includes(panel.status))
+        .map(panel => ({ panelId: panel.id, severity: panel.status === "critical" ? "critical" : "warning", status: panel.status }))
+        : activeAlerts.all();
+      return { generatedAt: useScheduled ? collection.latestSample : currentTime.toISOString(), scenario: useScheduled ? "normal" : scenario, panels, summary: summary(panels), site: site && { irradiance: site.irradiance, frequency: site.frequency }, alerts, collection, mode: useScheduled ? "scheduled" : "preview", readingCount: readingCount.get().count, telemetryIntervalSeconds: 60, analyticsIntervalSeconds: 3600, lifecycle: { active: lifecycleActive, step: lifecycleStep, total: lifecyclePhases.length, label: lifecycleStep ? currentPhase.label : "Lifecycle ready", events: eventRows.all(), ...(lifecycleSeries.length ? { series: lifecycleSeries } : {}) } };
     },
     startLifecycle() {
+      if (lifecycleActive) return this.snapshot();
+      preview = true;
       lifecycleStep = 0;
+      lifecycleSeries = [];
       lifecycleActive = true;
       scenario = "normal";
       clearAlerts.run();
@@ -189,6 +227,28 @@ export function createSimulation({ databasePath, now = () => new Date() }) {
       tickNumber += 1;
       appendReadings();
       lifecycleStep += 1;
+      const panels = panelRows.all();
+      const previous = lifecycleSeries.at(-1);
+      const stats = field => {
+        const values = panels.map(panel => panel[field]).filter(Number.isFinite);
+        return { average: values.reduce((a, b) => a + b, 0) / values.length, min: Math.min(...values), max: Math.max(...values) };
+      };
+      const temperature = stats("temperature");
+      const voltage = stats("voltage");
+      const current = stats("current");
+      const available = panels.filter(panel => panel.power !== null).length;
+      lifecycleSeries.push({
+        step: lifecycleStep, scenario, samples: 1, power: summary(panels).powerKw,
+        temperature: temperature.average, tempMin: temperature.min, tempMax: temperature.max,
+        voltage: voltage.average, voltageMin: voltage.min, voltageMax: voltage.max,
+        current: current.average, currentMin: current.min, currentMax: current.max,
+        efficiency: summary(panels).averageEfficiency,
+        irradiance: Math.round(780 + 95 * Math.sin(tickNumber / 3) - (scenario === "shading" ? 230 : 0)),
+        frequency: 50 + Math.round(70 * Math.sin(tickNumber / 4) + (scenario === "inverter" ? 260 : 0)) / 1000,
+        recorded: 100, availability: 100 * available / PANEL_COUNT,
+        warning: previous?.scenario !== scenario && alert?.severity === "warning" ? 1 : 0,
+        critical: previous?.scenario !== scenario && alert?.severity === "critical" ? 1 : 0
+      });
       if (lifecycleStep === lifecyclePhases.length) lifecycleActive = false;
       persistState();
       return this.snapshot();

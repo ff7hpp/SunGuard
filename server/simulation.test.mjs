@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createSimulation } from "./simulation.mjs";
+import { renderSimulationCharts } from "../history-charts.mjs";
 
 function withSimulation(run) {
   const directory = mkdtempSync(join(tmpdir(), "heliopulse-simulation-"));
@@ -17,14 +18,14 @@ function withSimulation(run) {
   }
 }
 
-test("a new simulation persists 500 uniquely addressed panels", () => {
+test("a new simulation persists 300 uniquely addressed panels", () => {
   withSimulation((simulation, databasePath) => {
     const snapshot = simulation.snapshot();
     assert.equal(existsSync(databasePath), true);
-    assert.equal(snapshot.panels.length, 500);
-    assert.equal(new Set(snapshot.panels.map(panel => panel.id)).size, 500);
-    assert.equal(snapshot.panels[102].index, 102);
-    assert.equal(snapshot.panels[102].id, "R05-C03");
+    assert.equal(snapshot.panels.length, 300);
+    assert.equal(new Set(snapshot.panels.map(panel => panel.id)).size, 300);
+    assert.equal(snapshot.panels[62].index, 62);
+    assert.equal(snapshot.panels[62].id, "R05-C03");
   });
 });
 
@@ -33,7 +34,7 @@ test("a simulation tick appends telemetry and changes the live snapshot", () => 
     const before = simulation.snapshot();
     simulation.tick();
     const after = simulation.snapshot();
-    assert.equal(after.readingCount, before.readingCount + 500);
+    assert.equal(after.readingCount, before.readingCount + 300);
     assert.notEqual(after.generatedAt, before.generatedAt);
   });
 });
@@ -58,5 +59,12 @@ test("a lifecycle run advances through persisted fault and recovery events", () 
     assert.equal(snapshot.lifecycle.step, 3);
     assert.equal(snapshot.scenario, "dust");
     assert.ok(snapshot.lifecycle.events.some(event => event.kind === "fault" && event.scenario === "dust"));
+    assert.deepEqual(snapshot.lifecycle.series.map(row => row.step), [1, 2, 3]);
+    assert.ok(snapshot.lifecycle.series[2].power < snapshot.lifecycle.series[1].power);
+    assert.equal(snapshot.lifecycle.series[2].warning, 1);
+    assert.notEqual(snapshot.lifecycle.series[1].frequency, snapshot.lifecycle.series[2].frequency);
+    assert.equal((renderSimulationCharts(snapshot.lifecycle).match(/class="paper history-card"/g) ?? []).length, 9);
+    assert.match(renderSimulationCharts(snapshot.lifecycle), /Stage 3 of 15/);
+    assert.equal(simulation.history().days.reduce((total, day) => total + day.samples, 0), 0);
   });
 });

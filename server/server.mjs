@@ -21,16 +21,48 @@ async function readJson(request) {
   try { return JSON.parse(raw || "{}"); } catch { throw new Error("Request body must be JSON"); }
 }
 
-export function createServer({ databasePath = resolve(projectDirectory, "data", "heliopulse.db"), staticDirectory = resolve(projectDirectory, "dist"), tickMs = 60_000 } = {}) {
+export function createServer({ databasePath = resolve(projectDirectory, "data", "sunguard.db"), staticDirectory = resolve(projectDirectory, "dist"), tickMs = 1_000, seedHistory = false, now = () => new Date(), provider } = {}) {
   mkdirSync(dirname(databasePath), { recursive: true });
-  const simulation = createSimulation({ databasePath });
-  const timer = setInterval(() => simulation.scheduledTick(), tickMs);
+  const simulation = createSimulation({ databasePath, now, provider });
+  if (seedHistory) simulation.seedHistory();
+  let lastMinute;
+  function collect() {
+    const at = now();
+    const minute = Math.floor(at.getTime() / 60_000);
+    if (minute === lastMinute) return;
+    try {
+      if (!simulation.collectScheduled(at).pending) lastMinute = minute;
+    } catch (error) { console.error("Telemetry collection failed:", error.message); }
+  }
+  collect();
+  const timer = setInterval(collect, tickMs);
   timer.unref();
+  let lifecycleTimer;
+  function scheduleLifecycle() {
+    lifecycleTimer = setInterval(() => {
+      if (!simulation.advanceLifecycle().lifecycle.active) clearInterval(lifecycleTimer);
+    }, 4_000);
+    lifecycleTimer.unref();
+  }
+  function startLifecycle() {
+    if (simulation.snapshot().lifecycle.active) return simulation.snapshot();
+    clearInterval(lifecycleTimer);
+    const snapshot = simulation.startLifecycle();
+    scheduleLifecycle();
+    return snapshot;
+  }
+  if (simulation.snapshot().lifecycle.active) scheduleLifecycle();
   const server = createHttpServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
     try {
       if (request.method === "GET" && url.pathname === "/api/health") return sendJson(response, 200, { status: "ok" });
       if (request.method === "GET" && url.pathname === "/api/snapshot") return sendJson(response, 200, simulation.snapshot());
+      if (request.method === "GET" && url.pathname === "/api/collection-status") return sendJson(response, 200, simulation.collectionStatus());
+      if (request.method === "GET" && url.pathname === "/api/history") {
+        const history = simulation.history(url.searchParams.get("date") ?? undefined);
+        return history ? sendJson(response, 200, history) : sendJson(response, 400, { error: "Date outside the seven-day window" });
+      }
+      if (request.method === "POST" && url.pathname === "/api/collection/view") return sendJson(response, 200, simulation.showCollection());
       if (request.method === "GET" && url.pathname === "/api/scenarios") return sendJson(response, 200, { scenarios: simulation.scenarios, active: simulation.snapshot().scenario });
       if (request.method === "POST" && url.pathname === "/api/scenarios") {
         const body = await readJson(request);
@@ -38,7 +70,7 @@ export function createServer({ databasePath = resolve(projectDirectory, "data", 
         try { return sendJson(response, 200, simulation.activateScenario(body.scenario)); }
         catch { return sendJson(response, 400, { error: "unknown scenario" }); }
       }
-      if (request.method === "POST" && url.pathname === "/api/lifecycle/start") return sendJson(response, 200, simulation.startLifecycle());
+      if (request.method === "POST" && url.pathname === "/api/lifecycle/start") return sendJson(response, 200, startLifecycle());
       if (request.method === "POST" && url.pathname === "/api/lifecycle/advance") return sendJson(response, 200, simulation.advanceLifecycle());
       if (request.method === "POST" && url.pathname === "/api/tick") return sendJson(response, 200, simulation.scheduledTick());
       if (request.method !== "GET" && request.method !== "HEAD") return sendJson(response, 405, { error: "method not allowed" });
@@ -65,6 +97,7 @@ export function createServer({ databasePath = resolve(projectDirectory, "data", 
     },
     async close() {
       clearInterval(timer);
+      clearInterval(lifecycleTimer);
       await new Promise(resolveClose => server.close(resolveClose));
       simulation.close();
     },
@@ -72,8 +105,8 @@ export function createServer({ databasePath = resolve(projectDirectory, "data", 
 }
 
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
-  const runtime = createServer();
+  const runtime = createServer({ seedHistory: true });
   const address = await runtime.listen();
-  console.log(`HelioPulse simulator running at http://127.0.0.1:${address.port}`);
+  console.log(`SunGuard simulator running at http://127.0.0.1:${address.port}`);
   process.on("SIGINT", async () => { await runtime.close(); process.exit(0); });
 }

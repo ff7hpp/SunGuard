@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { states } from "./farm.js";
+import { COLUMNS } from "./grid.js";
 
 function cellTexture() {
   const canvas = document.createElement("canvas");
@@ -102,7 +103,7 @@ export function mountScene(host, panels, select) {
         color: states[panel.status].color, side: THREE.DoubleSide, depthTest: false
       }));
       mark.position.set(
-        (panel.col - 13) * 1.46 + (Math.floor((panel.col - 1) / 5) - 2) * .76,
+        (panel.col - (COLUMNS + 1) / 2) * 1.46 + (Math.floor((panel.col - 1) / 5) - 1) * .76,
         1.05,
         (panel.row - 10.5) * 1.82 + (Math.floor((panel.row - 1) / 5) - 1.5) * .9
       );
@@ -115,7 +116,7 @@ export function mountScene(host, panels, select) {
   }
 
   for (const panel of panels) {
-    const x = (panel.col - 13) * 1.46 + (Math.floor((panel.col - 1) / 5) - 2) * .76;
+    const x = (panel.col - (COLUMNS + 1) / 2) * 1.46 + (Math.floor((panel.col - 1) / 5) - 1) * .76;
     const z = (panel.row - 10.5) * 1.82 + (Math.floor((panel.row - 1) / 5) - 1.5) * .9;
     meshPose.position.set(x, .56, z);
     meshPose.rotation.x = -Math.PI / 2 + .27;

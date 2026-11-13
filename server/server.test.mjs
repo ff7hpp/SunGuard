@@ -22,7 +22,7 @@ test("health and snapshot expose a live seeded simulator", async () => {
     const health = await fetch(`${origin}/api/health`);
     const snapshot = await fetch(`${origin}/api/snapshot`);
     assert.deepEqual(await health.json(), { status: "ok" });
-    assert.equal((await snapshot.json()).panels.length, 500);
+    assert.equal((await snapshot.json()).panels.length, 300);
   });
 });
 
