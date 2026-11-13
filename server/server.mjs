@@ -61,7 +61,9 @@ export function createServer({ databasePath = resolve(projectDirectory, "data", 
     try {
       if (request.method === "GET" && url.pathname === "/api/health") return sendJson(response, 200, { status: "ok" });
       if (request.method === "GET" && url.pathname === "/api/snapshot") {
-        if (remote && !simulationPreview) { const snapshot = await (await remote).snapshot(); if (snapshot) return sendJson(response, 200, { ...snapshot, simulationAvailable: true }); }
+        const at = url.searchParams.get("at");
+        if (at && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/.test(at) || !Number.isFinite(Date.parse(at)))) return sendJson(response, 400, { error: "Invalid timestamp" });
+        if (remote && (!simulationPreview || at)) { const snapshot = await (await remote).snapshot(at); if (snapshot) return sendJson(response, 200, { ...snapshot, simulationAvailable: true }); if (at) return sendJson(response, 404, { error: "No reading at this time" }); }
         return sendJson(response, 200, simulation.snapshot());
       }
       if (request.method === "GET" && url.pathname === "/api/collection-status") return sendJson(response, 200, simulation.collectionStatus());

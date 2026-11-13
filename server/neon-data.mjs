@@ -37,7 +37,7 @@ export function historyFromRows(rows, incidents, latest, date) {
   const minutes = rows.map(row => { const time = iso(row.time); const window = collectionWindow(new Date(time));
     return { ...row, time, date: window.localDate, minute: window.minute, quality: 'observed', efficiency: null, frequency: null, irradiance: null,
       availability: Number(row.recorded) ? 100 * Number(row.available) / PANEL_COUNT : null, recorded: Number(row.recorded), available: Number(row.available) }; });
-  const events = incidents.map(row => ({ time: iso(row.time), panelId: panelId(Number(row.panel_id) - 1), status: row.status, severity: row.status === 'critical' ? 'critical' : 'warning' }));
+  const events = incidents.map(row => ({ time: iso(row.time), panelId: panelId(Number(row.panel_id) - 1), fault: row.fault, status: row.status, severity: row.status === 'critical' ? 'critical' : 'warning' }));
   const days = dates.map(day => { const samples = minutes.filter(row => row.date === day); const dayEvents = events.filter(row => collectionWindow(new Date(row.time)).localDate === day);
     return { date: day, samples: samples.length, ...Object.fromEntries(['power','temperature','voltage','current','efficiency','frequency','availability'].map(key => [key, mean(samples.map(row => row[key]))])),
       tempMin: samples.length ? Math.min(...samples.map(row => row.tempMin)) : null, tempMax: samples.length ? Math.max(...samples.map(row => row.tempMax)) : null,

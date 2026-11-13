@@ -5,8 +5,22 @@ import { lifecycleProgress, metricCatalog, selectedMetrics, formatMetric } from 
 import { renderHistory, renderSimulationCharts } from "./history-charts.mjs";
 import { activitySubject } from "./activity.mjs";
 import { COLUMNS, PANEL_COUNT, HOTSPOT_INDEX } from "./grid.js";
+import { gsap } from "gsap";
+import Lenis from "lenis";
+import React from "react";
+import { createRoot } from "react-dom/client";
+import FadeContent from "./components/FadeContent.jsx";
+import { replaySummary } from "./replay.mjs";
 
 const $ = selector => document.querySelector(selector);
+const motionBadge = $("#motion-badge");
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) motionBadge.textContent = 'Solar operations';
+else createRoot(motionBadge).render(React.createElement(FadeContent, { trigger: 'mount', duration: 0.4 }, 'Solar operations'));
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  const lenis = new Lenis({ autoRaf: true });
+  window.addEventListener('pagehide', () => lenis.destroy(), { once: true });
+  gsap.from('.sidebar, main', { opacity: 0, y: 10, duration: 0.45, stagger: 0.08 });
+}
 const icons = {
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/>',
   layers: '<path d="m12 3 9 5-9 5-9-5 9-5zm-9 9 9 5 9-5M3 16l9 5 9-5"/>',
@@ -46,6 +60,7 @@ let historyDate = "";
 let historyRequest = 0;
 let historyLoaded = false;
 let simulationView = false;
+let recordedHistory = null, replayIndex = 0, replayTimer = null, replayActive = false, replayRequest = 0;
 let widgetIds = selectedMetrics(JSON.parse(localStorage.getItem("heliofield-metrics") || "[]"));
 
 const badge = status => `<span class="status ${status}">${states[status].mark} ${states[status].label}</span>`;
@@ -192,9 +207,13 @@ function navigate(next) {
 
 function analyticsChartsShell() {
   return `<section class="paper history" aria-label="Telemetry charts">
+    <div class="paper-head"><div><p class="eyebrow">RECORDED DATA</p><h2>Historical replay</h2></div><button data-replay-map="true">Show solar map</button></div>
+    <p class="context">Select a day below or choose seven days, then play recorded minutes. The map shows the selected recorded sample.</p>
+    <div class="scenario-controls"><button data-replay-play="true">Play recorded data</button><button data-replay-pause="true">Pause</button><button data-replay-latest="true">Return to latest sample</button></div>
+    <label>Recorded minute <input id="replay-position" type="range" min="0" max="0" value="0"></label><p id="replay-status" role="status" class="context">Choose a period to load recordings.</p><div id="replay-analysis" class="context"></div>
     <div class="paper-head chart-controls">
-      <div role="group" aria-label="Chart view"><button data-chart-view="history">Seven-day history</button><button data-chart-view="simulation">Live simulation</button></div>
-      <button id="start-chart-simulation" data-lifecycle-start="true">Start 1-minute simulation</button>
+      <div role="group" aria-label="Chart view"><button data-chart-view="history">Recorded history</button>${hasImported ? '' : '<button data-chart-view="simulation">Live simulation</button>'}</div>
+      <button id="start-chart-simulation" data-lifecycle-start="true" ${hasImported ? 'hidden' : ''}>Start 1-minute simulation</button>
     </div>
     <p id="chart-feedback" role="status" class="context"></p>
     <div id="history-view"><div class="paper-head"><h2>Seven-day history</h2><label>Period <select id="history-date"><option value="">Seven days</option></select></label></div>
@@ -237,6 +256,15 @@ async function loadHistory() {
       select.replaceChildren(new Option("Seven days", ""), ...result.days.map(day => new Option(day.date, day.date)));
     }
     select.value = historyDate;
+    recordedHistory = result;
+    replayIndex = 0;
+    clearInterval(replayTimer);
+    const slider = $("#replay-position");
+    slider.max = String(Math.max(0, result.minutes.length - 1)); slider.value = "0";
+    const summary = replaySummary(result);
+    const faults = Object.entries(Object.groupBy(result.incidents.filter(event => event.fault), event => event.fault)).sort((a,b) => b[1].length - a[1].length).map(([name, events]) => `${name.replaceAll('_', ' ')}: ${events.length}`).join(' · ');
+    $("#replay-analysis").textContent = `${result.date ?? "Seven days"} · ${result.minutes.length} recorded minutes · mean power ${summary.averagePower?.toFixed(2) ?? "—"} kW · peak temperature ${summary.peakTemperature?.toFixed(1) ?? "—"} °C · ${summary.incidents} recorded fault starts · ${summary.missing} missing panel readings. ${faults || 'No recorded faults.'} Suggested action: inspect affected panels and recorded fault labels; a fault label does not confirm a repair.`;
+    $("#replay-status").textContent = result.minutes.length ? "Ready to replay recorded readings." : "No recorded readings for this period.";
     content.innerHTML = renderHistory(result);
     feedback.textContent = "";
     historyLoaded = true;
@@ -248,6 +276,7 @@ async function loadHistory() {
 }
 
 $("#subpage").addEventListener("change", event => {
+  if (event.target.id === "replay-position") { replayIndex = Number(event.target.value); void showReplay(); return; }
   if (event.target.id !== "history-date") return;
   historyDate = event.target.value;
   historyLoaded = false;
@@ -277,6 +306,7 @@ function renderAnalytics() {
     return `<article class="paper metric analysis-widget"><div class="metric-label">${metric.label}</div><div class="reading">${metricValue(id)}</div><p>${metric.level} · live snapshot</p></article>`;
   }).join("");
   const catalog = metricCatalog.map(metric => `<button class="metric-choice" data-metric="${metric.id}" aria-pressed="${widgetIds.includes(metric.id)}"><strong>${widgetIds.includes(metric.id) ? "✓" : "+"} ${metric.label}</strong><small>${metric.level} · ${metric.unit}</small></button>`).join("");
+  if (hasImported) return `<article class="paper analysis"><div class="paper-head"><h2>Recorded data overview</h2><span class="live-state online">● Neon connected</span></div><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><p class="context">Use historical replay below to inspect the day or week. Values shown here describe the selected recorded minute.</p></article>`;
   const scenarios = ["normal", "dust", "overheat", "shading", "inverter", "missing"].map(name => `<button ${liveSnapshot?.simulationAvailable === false ? "disabled" : ""} data-scenario="${name}" aria-pressed="${liveSnapshot?.scenario === name}">${name}</button>`).join("");
   const lifecycle = liveSnapshot?.lifecycle;
   const progress = lifecycleProgress(lifecycle);
@@ -285,6 +315,7 @@ function renderAnalytics() {
 }
 
 async function syncLiveData() {
+  if (replayActive) return;
   try {
     const response = await fetch("/api/snapshot", { cache: "no-store" });
     if (!response.ok) throw new Error("snapshot unavailable");
@@ -329,6 +360,31 @@ async function syncLiveData() {
     apiAvailable = false;
     $(".demo-tag").innerHTML = "<i></i> Demo fallback";
   }
+}
+
+async function showReplay() {
+  const minute = recordedHistory?.minutes[replayIndex];
+  if (!minute) return;
+  const request = ++replayRequest;
+  replayActive = true;
+  try {
+    const response = await fetch(`/api/snapshot?at=${encodeURIComponent(minute.time)}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Recorded sample unavailable");
+    const snapshot = await response.json();
+    if (request !== replayRequest || !replayActive) return;
+    liveSnapshot = snapshot;
+    panels = snapshot.panels;
+    panels.forEach(panel => { updateTile(panel); scene?.update(panel); });
+    renderOverview();
+    $(".demo-tag").textContent = "Recorded replay · " + new Date(minute.time).toLocaleString("en-GB", { timeZone: "Europe/Istanbul" }) + " TRT";
+    $(".snapshot small").textContent = "RECORDED SAMPLE";
+    $(".snapshot strong").textContent = new Date(minute.time).toLocaleTimeString("en-GB", {timeZone:"Europe/Istanbul", hour:"2-digit", minute:"2-digit"}) + " TRT";
+    if ($("#replay-position")) $("#replay-position").value = String(replayIndex);
+    $("#map-replay-controls").hidden = false;
+    $("#map-replay-status").textContent = new Date(minute.time).toLocaleString("en-GB", {timeZone:"Europe/Istanbul"}) + " TRT";
+    if ($("#replay-status")) $("#replay-status").textContent = `${replayIndex + 1} / ${recordedHistory.minutes.length} · ${new Date(minute.time).toLocaleString("en-GB", {timeZone:"Europe/Istanbul"})} TRT`;
+    if (page === "analytics") $("#subpage .analysis").outerHTML = renderAnalytics();
+  } catch { clearInterval(replayTimer); if ($("#replay-status")) $("#replay-status").textContent = "Could not load the recorded sample. Retry playback."; }
 }
 
 async function commandSimulation(scenario) {
@@ -489,6 +545,14 @@ document.addEventListener("click", async event => {
   const { panel, open, page: target, range } = button.dataset;
   if (panel !== undefined) openPanel(Number(panel));
   if (target || open) navigate(target || open);
+  if (button.dataset.replayPlay) {
+    clearInterval(replayTimer);
+    await showReplay();
+    replayTimer = setInterval(() => { if (replayIndex >= (recordedHistory?.minutes.length ?? 0) - 1) return clearInterval(replayTimer); replayIndex++; void showReplay(); }, 1500);
+  }
+  if (button.dataset.replayPause) clearInterval(replayTimer);
+  if (button.dataset.replayLatest) { clearInterval(replayTimer); replayActive = false; replayRequest++; $("#map-replay-controls").hidden = true; await syncLiveData(); }
+  if (button.dataset.replayMap) navigate("map");
   if (range) {
     document.querySelectorAll("[data-range]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
     $("#history-chart").innerHTML = history(Number(range));
