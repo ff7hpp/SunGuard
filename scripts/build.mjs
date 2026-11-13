@@ -11,6 +11,7 @@ export async function buildStaticSite({ outputDirectory = resolve(projectDirecto
 
   await build({
     bundle: true,
+    jsx: "automatic",
     entryPoints: [resolve(projectDirectory, "app.js")],
     minify: true,
     define: {
