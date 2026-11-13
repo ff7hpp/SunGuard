@@ -1,7 +1,7 @@
 import { isolate, panels as samples, states } from "./farm.js";
 import { mountScene } from "./scene.js";
 import { themes, validTheme } from "./theme.js";
-import { lifecycleProgress, metricCatalog, selectedMetrics } from "./live-client.mjs";
+import { lifecycleProgress, metricCatalog, selectedMetrics, formatMetric } from "./live-client.mjs";
 import { renderHistory, renderSimulationCharts } from "./history-charts.mjs";
 import { activitySubject } from "./activity.mjs";
 import { COLUMNS, PANEL_COUNT, HOTSPOT_INDEX } from "./grid.js";
@@ -264,8 +264,8 @@ function metricValue(id) {
   };
   return {
     power: `${(panels.reduce((sum, panel) => sum + (panel.power ?? 0), 0) / 1000).toFixed(1)} kW`,
-    temperature: `${summary.averageTemperature ?? average("temperature")} °C`,
-    voltage: `${average("voltage")} V`, current: `${average("current")} A`, efficiency: `${summary.averageEfficiency ?? average("efficiency")} %`,
+    temperature: `${formatMetric(summary.averageTemperature ?? average("temperature"))} °C`,
+    voltage: `${average("voltage")} V`, current: `${average("current")} A`, efficiency: `${formatMetric(summary.averageEfficiency ?? average("efficiency"))} %`,
     irradiance: `${liveSnapshot?.site?.irradiance ?? "—"} W/m²`, frequency: `${liveSnapshot?.site?.frequency ?? "—"} Hz`, availability: `${Math.round(available.length / total * 100)} %`,
     alerts: `${activeAlerts().length} open`,
   }[id];

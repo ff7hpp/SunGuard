@@ -1,3 +1,5 @@
+export const formatMetric = value => Number.isFinite(value) ? value.toFixed(1) : "—";
+
 export const metricCatalog = [
   { id: "power", label: "Power output", unit: "kW", level: "Farm" },
   { id: "temperature", label: "Panel temperature", unit: "°C", level: "Panel / farm" },
