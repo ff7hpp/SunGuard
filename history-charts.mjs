@@ -14,7 +14,7 @@ function plot(metric, rows, minuteView, dates = [], imported = false) {
   const minKey = { temperature: "tempMin", voltage: "voltageMin", current: "currentMin" }[id];
   const maxKey = { temperature: "tempMax", voltage: "voltageMax", current: "currentMax" }[id];
   const values = rows.flatMap(row => [row[id], row[minKey], row[maxKey]]).filter(Number.isFinite);
-  const fixed = { power: 0, frequency: 50, voltage: imported ? undefined : 39 }[id];
+  const fixed = { power: 0, voltage: imported ? undefined : 39 }[id];
   if (Number.isFinite(fixed)) values.push(fixed);
   if (!rows.some(row => Number.isFinite(row[id]))) return '<p class="context">No measurements for this selection.</p>';
   const lower = Math.min(...values);
@@ -46,24 +46,21 @@ function plot(metric, rows, minuteView, dates = [], imported = false) {
       const high = row[maxKey] ?? row[id];
       marks.push(`<line class="${id === "temperature" && high >= 70 ? "history-critical" : "history-range"}" x1="${px}" x2="${px}" y1="${y(low)}" y2="${y(high)}"><title>${label(row)} · ${number(low)}–${number(high)} ${metric.unit}</title></line>`);
     }
-    if (id === "frequency") {
-      marks.push(`<line x1="${px}" x2="${px}" y1="${y(50)}" y2="${py}"><title>${label(row)} · ${number(row[id])} Hz (${(row[id] - 50).toFixed(3)} Hz from 50)</title></line>`);
-    }
     if (id === "current") {
       for (const value of new Set([row[minKey], row[id], row[maxKey]])) {
         if (Number.isFinite(value)) marks.push(dot(px, y(value), `${label(row)} · ${number(value)} A`, radius));
       }
     } else {
-      marks.push(dot(px, py, `${label(row)} · ${id === "frequency" ? row[id].toFixed(3) : number(row[id])} ${metric.unit}`, radius));
+      marks.push(dot(px, py, `${label(row)} · ${number(row[id])} ${metric.unit}`, radius));
     }
   });
   if (points.length) segments.push(points);
-  const lines = ["power", "voltage", "efficiency"].includes(id) ? segments.map(segment => {
+  const lines = ["power", "voltage"].includes(id) ? segments.map(segment => {
     const path = segment.map(([x, y], i) => `${i ? "L" : "M"}${x},${y}`).join("");
     const area = id === "power" ? `<path class="history-area" d="${path}L${segment.at(-1)[0]},${y(0)}L${segment[0][0]},${y(0)}Z"/>` : "";
     return `${area}<path class="history-line" d="${path}"/>`;
   }).join("") : "";
-  const reference = ["frequency", "voltage"].includes(id) && Number.isFinite(fixed)
+  const reference = id === "voltage" && Number.isFinite(fixed)
     ? `<path class="history-reference" d="M36 ${y(fixed)}H392"><title>Simulation reference ${fixed} ${metric.unit}</title></path>` : "";
   const axis = rows[0]?.step ? '<text x="40" y="125">Stage 1</text><text x="386" y="125" text-anchor="end">Stage 15</text>'
     : minuteView ? minuteAxis(dates)
@@ -108,19 +105,22 @@ function heatmap(dates, minutes, imported) {
       const end = Math.min(start + block, operatingMinutes);
       const values = [];
       for (let j = start; j < end; j++) {
-        const value = minutes.get(index * operatingMinutes + j)?.[imported ? "illuminance" : "irradiance"];
+        const value = minutes.get(index * operatingMinutes + j)?.illuminance;
         if (Number.isFinite(value)) values.push(value);
       }
       const value = values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : null;
       return `<span title="${date} · ${clock(start + 540)}${weekly ? "–" + clock(end - 1 + 540) : ""} · ${number(value)} ${imported ? "lux" : "W/m²"}" style="--heat:${Number.isFinite(value) ? Math.min(100, value / (imported ? 655.35 : 10)) : 0}%"></span>`;
     }).join("");
-    return `<div class="${weekly ? "history-heat-row" : ""}">${weekly ? `<span>${date.slice(5)}</span>` : ""}<div class="history-minute-heat" aria-label="${date} ${imported ? "illuminance" : "irradiance"} heatmap">${cells}</div></div>`;
+    return `<div class="${weekly ? "history-heat-row" : ""}">${weekly ? `<span>${date.slice(5)}</span>` : ""}<div class="history-minute-heat" aria-label="${date} illuminance heatmap">${cells}</div></div>`;
   }).join("") + `<p class="context">09:00–17:30 · ${weekly ? "each square averages up to 15 minutes" : "each square represents one minute"}.</p>`;
 }
 
-export function renderHistory(data) {
-  const { days, date, minutes, incidents } = data;
-  const dates = date ? [date] : days.map(day => day.date);
+export function renderHistory(data, replayTime = null) {
+  const { date } = data;
+  const cutoff = replayTime ? Date.parse(replayTime) : Infinity;
+  const minutes = data.minutes.filter(row => Date.parse(row.time) <= cutoff);
+  const incidents = data.incidents.filter(row => Date.parse(row.time) <= cutoff);
+  const dates = date ? [date] : [...new Set(minutes.map(row => row.date))];
   const dayIndexes = new Map(dates.map((day, index) => [day, index]));
   const rows = minutes.map(row => {
     const day = date ?? row.date;
@@ -139,8 +139,7 @@ export function renderHistory(data) {
   }
   const cards = metricCatalog.map(metric => {
     let chart;
-    if (metric.id === "irradiance") chart = heatmap(dates, byMinute, data.imported);
-    else if (data.imported && ["efficiency", "frequency"].includes(metric.id)) chart = '<p class="context">Not recorded in the imported file.</p>';
+    if (metric.id === "illuminance") chart = heatmap(dates, byMinute, data.imported);
     else if (!rows.length) chart = '<p class="context">No samples for this period.</p>';
     else if (metric.id === "availability") {
       chart = bars(rows, metric.id, true, dates) + '<p class="context">Available · unavailable · unreported</p>';
@@ -149,15 +148,8 @@ export function renderHistory(data) {
       chart = bars(alertRows, metric.id, true, dates) + '<p class="context">New warning and critical incidents. Offline events count as warnings.</p>';
       if (incidentsByMinute.size) chart += `<details><summary>Incident details</summary><ul>${incidents.filter(event => minuteByTimestamp.has(event.time)).map(event =>
         `<li>${minuteLabel(minuteByTimestamp.get(event.time))} · ${event.panelId} · ${event.status}</li>`).join("")}</ul></details>`;
-    } else if (metric.id === "efficiency") {
-      const valid = rows.filter(row => Number.isFinite(row.efficiency));
-      const value = valid.length ? valid.reduce((sum, row) => sum + row.efficiency * (row.samples ?? 1), 0)
-        / valid.reduce((sum, row) => sum + (row.samples ?? 1), 0) : null;
-      const gauge = Number.isFinite(value) ? `<div class="history-gauge" style="--gauge:${value}%"><strong>${number(value)}%</strong></div>` : "";
-      chart = gauge + plot(metric, rows, true, dates);
     } else chart = plot(metric, rows, true, dates, data.imported);
-    const light = data.imported && metric.id === "irradiance";
-    return `<article class="paper history-card"><h3>${light ? "Illuminance" : metric.label} <small>${light ? "lux" : metric.unit}</small></h3>${chart}</article>`;
+    return `<article class="paper history-card"><h3>${metric.label} <small>${metric.unit}</small></h3>${chart}</article>`;
   }).join("");
   return `<p class="context">${data.imported ? "Imported measurements" : data.source === "simulated" ? "Simulated measurements" : "Real measurements"} · ${dates[0]}${dates.length > 1 ? " to " + dates.at(-1) : ""} · Europe/Istanbul · ${rows.length} recorded minutes${provenance ? " · " + provenance : ""}</p><div class="history-grid">${cards}</div>`;
 }
@@ -168,16 +160,15 @@ export function renderSimulationCharts(lifecycle) {
   const cards = metricCatalog.map(metric => {
     const id = metric.id;
     let chart = '<p class="context">Waiting for first stage…</p>';
-    if (latest && id === "irradiance") {
+    if (latest && id === "illuminance") {
       chart = `<div class="history-minute-heat simulation-heat">${Array.from({ length: 15 }, (_, i) => {
-        const value = rows[i]?.irradiance;
+        const value = rows[i]?.illuminance;
         return `<span title="Stage ${i + 1} · ${number(value)} W/m²" style="--heat:${value ? Math.min(100, value / 10) : 0}%"></span>`;
       }).join("")}</div>`;
     } else if (latest && ["availability", "alerts"].includes(id)) {
       chart = bars(rows, id, false);
     } else if (latest) {
       chart = plot(metric, rows, false);
-      if (id === "efficiency") chart = `<div class="history-gauge" style="--gauge:${latest.efficiency}%"><strong>${number(latest.efficiency)}%</strong></div>` + chart;
     }
     const value = id === "alerts" && latest ? latest.warning + latest.critical : latest?.[id];
     return `<article class="paper history-card"><h3>${metric.label} <small>${metric.unit}</small></h3><p class="context">${number(value)} ${metric.unit}</p>${chart}</article>`;

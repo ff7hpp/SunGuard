@@ -7,10 +7,11 @@ test("metric summaries round measured values while preserving missing data", () 
   assert.equal(formatMetric(null), "—");
 });
 
-test("analysis catalog provides nine metrics and preserves a focused default", () => {
-  assert.equal(metricCatalog.length, 9);
+test("analysis catalog only offers metrics backed by imported telemetry", () => {
+  assert.equal(metricCatalog.length, 7);
+  assert.deepEqual(metricCatalog.map(metric => metric.id), ["power", "temperature", "voltage", "current", "illuminance", "availability", "alerts"]);
   assert.deepEqual(selectedMetrics([]), ["power", "temperature", "alerts"]);
-  assert.deepEqual(selectedMetrics(["power", "frequency", "invalid"]), ["power", "frequency"]);
+  assert.deepEqual(selectedMetrics(["power", "frequency", "efficiency", "invalid"]), ["power"]);
 });
 
 test("lifecycle progress reports a bounded 15-step simulation", () => {

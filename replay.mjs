@@ -1,3 +1,7 @@
+export function replayInterval(speed) {
+  return 60000 / ([1, 5, 10, 50, 100].includes(speed) ? speed : 1);
+}
+
 export function replaySummary(data) {
   const minutes = data.minutes || [];
   const power = minutes.map(row => row.power).filter(Number.isFinite);

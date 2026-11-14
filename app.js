@@ -1,21 +1,15 @@
 import { isolate, panels as samples, states } from "./farm.js";
 import { mountScene } from "./scene.js";
 import { themes, validTheme } from "./theme.js";
-import { lifecycleProgress, metricCatalog, selectedMetrics, formatMetric } from "./live-client.mjs";
-import { renderHistory, renderSimulationCharts } from "./history-charts.mjs";
+import { metricCatalog, selectedMetrics, formatMetric } from "./live-client.mjs";
+import { renderHistory } from "./history-charts.mjs";
 import { activitySubject } from "./activity.mjs";
 import { COLUMNS, PANEL_COUNT, HOTSPOT_INDEX } from "./grid.js";
 import { gsap } from "gsap";
 import Lenis from "lenis";
-import React from "react";
-import { createRoot } from "react-dom/client";
-import FadeContent from "./components/FadeContent.jsx";
-import { replaySummary } from "./replay.mjs";
+import { replaySummary, replayInterval } from "./replay.mjs";
 
 const $ = selector => document.querySelector(selector);
-const motionBadge = $("#motion-badge");
-if (matchMedia('(prefers-reduced-motion: reduce)').matches) motionBadge.textContent = 'Solar operations';
-else createRoot(motionBadge).render(React.createElement(FadeContent, { trigger: 'mount', duration: 0.4 }, 'Solar operations'));
 if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
   const lenis = new Lenis({ autoRaf: true });
   window.addEventListener('pagehide', () => lenis.destroy(), { once: true });
@@ -59,17 +53,10 @@ let apiAvailable = false;
 let historyDate = "";
 let historyRequest = 0;
 let historyLoaded = false;
-let simulationView = false;
-let recordedHistory = null, replayIndex = 0, replayTimer = null, replayActive = false, replayRequest = 0;
+let recordedHistory = null, replayIndex = 0, replayTimer = null, replayActive = false, replayPlaying = false, replayRequest = 0, replaySpeed = 1;
 let widgetIds = selectedMetrics(JSON.parse(localStorage.getItem("heliofield-metrics") || "[]"));
 
 const badge = status => `<span class="status ${status}">${states[status].mark} ${states[status].label}</span>`;
-const spark = (values, label, color = "currentColor") => {
-  const max = Math.max(...values) * 1.12 || 1;
-  const path = values.map((value, index) => `${index ? "L" : "M"}${(index / (values.length - 1) * 400).toFixed(1)} ${(70 - value / max * 65).toFixed(1)}`).join(" ");
-  return `<svg class="spark" viewBox="0 0 400 74" preserveAspectRatio="none" role="img" aria-label="${label}"><path class="chart-grid" d="M0 24h400M0 48h400M0 72h400"/><path d="${path} L400 73 L0 73Z" fill="${color}" opacity=".10"/><path d="${path}" fill="none" stroke="${color}" stroke-width="1.75" vector-effect="non-scaling-stroke"/></svg>`;
-};
-
 $("#legend").innerHTML = Object.keys(states).map(badge).join("");
 
 for (const panel of panels) {
@@ -139,21 +126,18 @@ function activeAlerts() {
     .sort((a, b) => Number(b.status === "critical") - Number(a.status === "critical"));
 }
 
-const curve = [9, 12, 23, 28, 47, 57, 78, 69, 88, 92, 85, 90, 80, 74, 71, 58, 62, 49, 35];
-
 function renderOverview() {
   const summary = liveSnapshot?.summary;
-  const imported = liveSnapshot?.mode === "scheduled" && liveSnapshot.collection?.imported;
   const power = panels.reduce((sum, panel) => sum + (panel.power ?? 0), 0) / 1000;
   const healthy = panels.filter(panel => panel.status === "normal").length;
   const alerts = activeAlerts();
   $("#nav-alerts").textContent = alerts.length;
   $("#hotspot").hidden = panels[HOTSPOT_INDEX].status !== "critical";
   $("#metrics").innerHTML = `
-    <article class="paper metric production"><div class="metric-label">${icon("bolt")} Power output</div><div class="reading">${power.toFixed(1)} <small>kW</small></div><p>Output at displayed sample time</p>${imported ? '<button class="text-button" data-open="analytics">View recorded history</button>' : spark(curve, "Illustrative generation trend", "#a44525")}</article>
+    <article class="paper metric production"><div class="metric-label">${icon("bolt")} Power output</div><div class="reading">${power.toFixed(1)} <small>kW</small></div><p>Output at displayed sample time</p><button class="text-button" data-open="analytics">View recorded history</button></article>
     <article class="paper metric"><div class="metric-label">${icon("layers")} Array health</div><div class="reading">${healthy}<small> / ${PANEL_COUNT}</small></div><p>Modules in normal range</p><div class="progress"><span style="width:${healthy / PANEL_COUNT * 100}%"></span></div></article>
     <article class="paper metric"><div class="metric-label">${icon("bell")} Active alerts</div><div class="reading">${alerts.length}<small> open</small></div><p>${alerts.filter(panel => panel.status === "critical").length} critical · ${alerts.filter(panel => panel.status === "warning").length} warnings</p><button class="text-button" data-open="alerts">Inspect alerts ${icon("arrow")}</button></article>
-    <article class="paper metric"><div class="metric-label">${icon("sun")} Field conditions</div><div class="reading">${Number.isFinite(summary?.averageTemperature) ? summary.averageTemperature.toFixed(1) : (imported ? "—" : 31)}<small> °C</small></div><p>Average panel temperature</p><div class="environment"><span>${imported ? "Imported telemetry" : "Simulated telemetry"}</span></div></article>`;
+    <article class="paper metric"><div class="metric-label">${icon("sun")} Field conditions</div><div class="reading">${Number.isFinite(summary?.averageTemperature) ? summary.averageTemperature.toFixed(1) : "—"}<small> °C</small></div><p>Average panel temperature</p><div class="environment"><span>Recorded value</span></div></article>`;
   $("#overview-alerts").innerHTML = `<div class="paper-head"><div><p class="eyebrow">FIELD EVENTS</p><h2>Needs attention</h2></div><button class="text-button" data-open="alerts">All alerts ${icon("arrow")}</button></div>${alertRows(alerts.slice(0, 3))}`;
 }
 
@@ -181,7 +165,6 @@ function navigate(next) {
   const title = { overview: "Overview", map: "Solar map", analytics: "Analytics", alerts: "Alerts", activity: "Activity log" }[next];
   document.querySelectorAll("[data-page]").forEach(item => item.removeAttribute("aria-current"));
   button.setAttribute("aria-current", "page");
-  $("#crumb").textContent = title;
   const primary = next === "overview" || next === "map";
   $("#primary").hidden = !primary;
   $("#metrics").hidden = $("#overview-alerts").hidden = next === "map";
@@ -193,10 +176,9 @@ function navigate(next) {
     const body = next === "analytics" ? renderAnalytics()
       : next === "alerts" ? `<article class="paper alert-section"><div class="paper-head"><h2>Active alerts</h2></div>${alertRows(activeAlerts())}</article>`
       : `<article class="paper alert-section"><div class="paper-head"><h2>Session events</h2></div><div id="activity-rows"></div></article>`;
-    $("#subpage").innerHTML = `<header class="intro"><div><p class="eyebrow section-tag">OPERATIONS / ${title.toUpperCase()}</p><h1 tabindex="-1">${title}</h1><p>${{ analytics: "Inspect scheduled telemetry and run scenario previews.", alerts: "Inspect modules that need attention.", activity: "Review simulated actions and maintenance changes." }[next]}</p></div></header>${body}${next === "analytics" ? analyticsChartsShell() : ""}`;
+    $("#subpage").innerHTML = `<header class="intro"><h1 tabindex="-1">${title}</h1></header>${body}${next === "analytics" ? analyticsChartsShell() : ""}`;
     if (next === "analytics") {
       historyLoaded = false;
-      updateChartView();
       void loadHistory();
     }
     if (next === "activity") renderActivity();
@@ -207,31 +189,14 @@ function navigate(next) {
 
 function analyticsChartsShell() {
   return `<section class="paper history" aria-label="Telemetry charts">
-    <div class="paper-head"><div><p class="eyebrow">RECORDED DATA</p><h2>Historical replay</h2></div><button data-replay-map="true">Show solar map</button></div>
-    <p class="context">Select a day below or choose seven days, then play recorded minutes. The map shows the selected recorded sample.</p>
-    <div class="scenario-controls"><button data-replay-play="true">Play recorded data</button><button data-replay-pause="true">Pause</button><button data-replay-latest="true">Return to latest sample</button></div>
-    <label>Recorded minute <input id="replay-position" type="range" min="0" max="0" value="0"></label><p id="replay-status" role="status" class="context">Choose a period to load recordings.</p><div id="replay-analysis" class="context"></div>
-    <div class="paper-head chart-controls">
-      <div role="group" aria-label="Chart view"><button data-chart-view="history">Recorded history</button>${hasImported ? '' : '<button data-chart-view="simulation">Live simulation</button>'}</div>
-      <button id="start-chart-simulation" data-lifecycle-start="true" ${hasImported ? 'hidden' : ''}>Start 1-minute simulation</button>
-    </div>
+    <div class="paper-head replay-heading"><div><p class="eyebrow">RECORDED DATA</p><h2>Historical replay</h2></div><button data-replay-map="true">Show solar map</button></div>
+    <p class="context replay-intro">Move through the recorded minutes. The map, readings, alerts, and charts follow the same timestamp.</p>
+    <div class="replay-toolbar"><div class="replay-actions"><button class="primary-button" data-replay-play="true">Play recorded data</button><button data-replay-pause="true">Pause</button><button data-replay-latest="true">Return to latest sample</button><label class="replay-speed">Speed <select id="replay-speed">${[1, 5, 10, 50, 100].map(speed => `<option value="${speed}" ${speed === replaySpeed ? "selected" : ""}>${speed}×</option>`).join("")}</select></label></div><label class="replay-scrubber">Recorded minute<input id="replay-position" type="range" min="0" max="0" value="0"></label></div>
+    <div class="replay-state"><p id="replay-status" role="status" class="context">Choose a period to load recordings.</p><p id="replay-analysis" class="replay-analysis"></p></div>
     <p id="chart-feedback" role="status" class="context"></p>
     <div id="history-view"><div class="paper-head"><h2>Seven-day history</h2><label>Period <select id="history-date"><option value="">Seven days</option></select></label></div>
       <p id="history-feedback" class="context" role="status"></p><div id="history-content"></div></div>
-    <div id="simulation-view" hidden><h2>Live simulation</h2><p class="context">Charts update every four seconds during a run. Saved history stays available in the other view.</p><div id="simulation-charts"></div></div>
   </section>`;
-}
-
-function updateChartView() {
-  if (page !== "analytics") return;
-  $("#history-view").hidden = simulationView;
-  $("#simulation-view").hidden = !simulationView;
-  for (const button of document.querySelectorAll("[data-chart-view]")) {
-    button.setAttribute("aria-pressed", String((button.dataset.chartView === "simulation") === simulationView));
-  }
-  const lifecycle = liveSnapshot?.lifecycle;
-  $("#start-chart-simulation").disabled = !apiAvailable || Boolean(lifecycle?.active) || liveSnapshot?.simulationAvailable === false;
-  if (simulationView) $("#simulation-charts").innerHTML = renderSimulationCharts(lifecycle);
 }
 
 async function loadHistory() {
@@ -256,16 +221,16 @@ async function loadHistory() {
       select.replaceChildren(new Option("Seven days", ""), ...result.days.map(day => new Option(day.date, day.date)));
     }
     select.value = historyDate;
+    const continuing = replayActive && recordedHistory?.date === result.date;
     recordedHistory = result;
-    replayIndex = 0;
-    clearInterval(replayTimer);
+    if (!continuing) { replayIndex = 0; clearInterval(replayTimer); replayTimer = null; replayActive = false; replayPlaying = false; replayRequest++; }
     const slider = $("#replay-position");
-    slider.max = String(Math.max(0, result.minutes.length - 1)); slider.value = "0";
+    slider.max = String(Math.max(0, result.minutes.length - 1)); slider.value = String(replayIndex);
     const summary = replaySummary(result);
     const faults = Object.entries(Object.groupBy(result.incidents.filter(event => event.fault), event => event.fault)).sort((a,b) => b[1].length - a[1].length).map(([name, events]) => `${name.replaceAll('_', ' ')}: ${events.length}`).join(' · ');
     $("#replay-analysis").textContent = `${result.date ?? "Seven days"} · ${result.minutes.length} recorded minutes · mean power ${summary.averagePower?.toFixed(2) ?? "—"} kW · peak temperature ${summary.peakTemperature?.toFixed(1) ?? "—"} °C · ${summary.incidents} recorded fault starts · ${summary.missing} missing panel readings. ${faults || 'No recorded faults.'} Suggested action: inspect affected panels and recorded fault labels; a fault label does not confirm a repair.`;
     $("#replay-status").textContent = result.minutes.length ? "Ready to replay recorded readings." : "No recorded readings for this period.";
-    content.innerHTML = renderHistory(result);
+    content.innerHTML = renderHistory(result, continuing ? result.minutes[replayIndex]?.time : null);
     feedback.textContent = "";
     historyLoaded = true;
   } catch {
@@ -276,6 +241,11 @@ async function loadHistory() {
 }
 
 $("#subpage").addEventListener("change", event => {
+  if (event.target.id === "replay-speed") {
+    replaySpeed = Number(event.target.value);
+    if (replayTimer) startReplayTimer();
+    return;
+  }
   if (event.target.id === "replay-position") { replayIndex = Number(event.target.value); void showReplay(); return; }
   if (event.target.id !== "history-date") return;
   historyDate = event.target.value;
@@ -294,8 +264,7 @@ function metricValue(id) {
   return {
     power: `${(panels.reduce((sum, panel) => sum + (panel.power ?? 0), 0) / 1000).toFixed(1)} kW`,
     temperature: `${formatMetric(summary.averageTemperature ?? average("temperature"))} °C`,
-    voltage: `${average("voltage")} V`, current: `${average("current")} A`, efficiency: `${formatMetric(summary.averageEfficiency ?? average("efficiency"))} %`,
-    irradiance: `${liveSnapshot?.site?.irradiance ?? "—"} W/m²`, frequency: `${liveSnapshot?.site?.frequency ?? "—"} Hz`, availability: `${Math.round(available.length / total * 100)} %`,
+    voltage: `${average("voltage")} V`, current: `${average("current")} A`, illuminance: `${average("lux")} lux`, availability: `${Math.round(available.length / total * 100)} %`,
     alerts: `${activeAlerts().length} open`,
   }[id];
 }
@@ -306,12 +275,7 @@ function renderAnalytics() {
     return `<article class="paper metric analysis-widget"><div class="metric-label">${metric.label}</div><div class="reading">${metricValue(id)}</div><p>${metric.level} · live snapshot</p></article>`;
   }).join("");
   const catalog = metricCatalog.map(metric => `<button class="metric-choice" data-metric="${metric.id}" aria-pressed="${widgetIds.includes(metric.id)}"><strong>${widgetIds.includes(metric.id) ? "✓" : "+"} ${metric.label}</strong><small>${metric.level} · ${metric.unit}</small></button>`).join("");
-  if (hasImported) return `<article class="paper analysis"><div class="paper-head"><h2>Recorded data overview</h2><span class="live-state online">● Neon connected</span></div><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><p class="context">Use historical replay below to inspect the day or week. Values shown here describe the selected recorded minute.</p></article>`;
-  const scenarios = ["normal", "dust", "overheat", "shading", "inverter", "missing"].map(name => `<button ${liveSnapshot?.simulationAvailable === false ? "disabled" : ""} data-scenario="${name}" aria-pressed="${liveSnapshot?.scenario === name}">${name}</button>`).join("");
-  const lifecycle = liveSnapshot?.lifecycle;
-  const progress = lifecycleProgress(lifecycle);
-  const events = lifecycle?.events?.slice().reverse().map(event => `<li><b>${event.step}/15</b> · ${event.message}</li>`).join("") || "<li>No lifecycle events yet.</li>";
-  return `<article class="paper analysis"><div class="paper-head"><div><p class="eyebrow">${liveSnapshot?.collection?.imported ? 'IMPORTED TELEMETRY' : 'SIMULATED TELEMETRY'}</p><h2>Your analytics</h2></div><span class="live-state ${apiAvailable ? "online" : "offline"}">${apiAvailable ? (liveSnapshot?.storage === "neon" ? "● Neon connected" : "● SQLite connected") : "○ Static demo fallback"}</span></div><p class="context">${liveSnapshot?.collection?.imported ? 'Browse the imported measurements above. Scenario previews are available in the local simulator.' : 'Scheduled samples are collected every minute from 09:00 to 17:30 Istanbul time. Scenario previews run separately.'}</p><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><section class="lifecycle"><div><p class="eyebrow">SIMULATED YEAR / 1 MINUTE</p><h3>${lifecycle?.active ? lifecycle.label : "Lifecycle simulator"}</h3><p>${progress.current} of ${progress.total} simulated periods complete · ${lifecycle?.active ? "next update within 4 seconds" : "ready to start"}</p></div><button class="primary-button" data-lifecycle-start="true" ${!apiAvailable || lifecycle?.active || liveSnapshot?.simulationAvailable === false ? "disabled" : ""}>Start 1-minute simulation</button><div class="lifecycle-bar" aria-label="Lifecycle progress"><span style="width:${progress.percent}%"></span></div><ol class="lifecycle-events">${events}</ol></section><div class="scenario-controls"><strong>Manual scenario controls</strong><span>${scenarios}</span><button data-tick="true" ${liveSnapshot?.simulationAvailable === false ? "disabled" : ""}>Advance one minute</button><button data-collection="true" ${(!liveSnapshot?.collection?.latestSample && !hasImported) || lifecycle?.active || liveSnapshot?.simulationAvailable === false ? "disabled" : ""}>Show latest saved sample</button><p id="simulation-feedback" role="status"></p></div></article>`;
+  return `<article class="paper analysis"><div class="paper-head"><h2>Recorded analysis</h2></div><div class="analysis-grid">${widgets}</div><details class="widget-catalog"><summary>+ Add or remove analysis widgets</summary><div>${catalog}</div></details><p class="context">${hasImported ? "Values reflect the displayed recorded minute." : "Recorded history is not available yet."}</p></article>`;
 }
 
 async function syncLiveData() {
@@ -334,12 +298,6 @@ async function syncLiveData() {
     $(".snapshot small").textContent = snapshot.collection?.imported ? "RECORDED SAMPLE" : "SIMULATION SNAPSHOT";
     const time = new Date(snapshot.generatedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Istanbul" });
     $(".snapshot strong").innerHTML = `${time} <em>TRT</em>`;
-    $(".demo-tag").textContent = snapshot.mode === "preview" ? "Simulation preview"
-      : snapshot.collection?.imported ? "Imported telemetry · latest sample"
-      : !snapshot.collection?.active ? "Collection closed · last sample"
-      : snapshot.collection.quality === "seeded" ? "Seeded history · awaiting collection"
-      : snapshot.collection.latestSample !== snapshot.collection.sampleTime ? "Last sample · awaiting collection"
-      : snapshot.collection.source === "real" ? "Scheduled measurements" : "Scheduled simulation";
     if (previouslyAvailable && previousSnapshot?.generatedAt === snapshot.generatedAt
       && previousSnapshot?.mode === snapshot.mode
       && previousSnapshot?.collection?.revision === snapshot.collection?.revision
@@ -349,7 +307,6 @@ async function syncLiveData() {
     renderOverview();
     if (page === "alerts") $("#subpage .alert-section").innerHTML = `<div class="paper-head"><h2>Active alerts</h2></div>${alertRows(activeAlerts())}`;
     if (page === "analytics") {
-      updateChartView();
       const scrollPosition = window.scrollY;
       const catalogOpen = $("#subpage .widget-catalog").open;
       $("#subpage .analysis").outerHTML = renderAnalytics();
@@ -358,7 +315,6 @@ async function syncLiveData() {
     }
   } catch {
     apiAvailable = false;
-    $(".demo-tag").innerHTML = "<i></i> Demo fallback";
   }
 }
 
@@ -376,7 +332,6 @@ async function showReplay() {
     panels = snapshot.panels;
     panels.forEach(panel => { updateTile(panel); scene?.update(panel); });
     renderOverview();
-    $(".demo-tag").textContent = "Recorded replay · " + new Date(minute.time).toLocaleString("en-GB", { timeZone: "Europe/Istanbul" }) + " TRT";
     $(".snapshot small").textContent = "RECORDED SAMPLE";
     $(".snapshot strong").textContent = new Date(minute.time).toLocaleTimeString("en-GB", {timeZone:"Europe/Istanbul", hour:"2-digit", minute:"2-digit"}) + " TRT";
     if ($("#replay-position")) $("#replay-position").value = String(replayIndex);
@@ -384,51 +339,17 @@ async function showReplay() {
     $("#map-replay-status").textContent = new Date(minute.time).toLocaleString("en-GB", {timeZone:"Europe/Istanbul"}) + " TRT";
     if ($("#replay-status")) $("#replay-status").textContent = `${replayIndex + 1} / ${recordedHistory.minutes.length} · ${new Date(minute.time).toLocaleString("en-GB", {timeZone:"Europe/Istanbul"})} TRT`;
     if (page === "analytics") $("#subpage .analysis").outerHTML = renderAnalytics();
-  } catch { clearInterval(replayTimer); if ($("#replay-status")) $("#replay-status").textContent = "Could not load the recorded sample. Retry playback."; }
+    if (page === "analytics" && $("#history-content")) $("#history-content").innerHTML = renderHistory(recordedHistory, minute.time);
+  } catch { clearInterval(replayTimer); replayTimer = null; replayPlaying = false; if ($("#replay-status")) $("#replay-status").textContent = "Could not load the recorded sample. Retry playback."; }
 }
 
-async function commandSimulation(scenario) {
-  try {
-    const response = await fetch(scenario ? "/api/scenarios" : "/api/tick", scenario ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scenario }) } : { method: "POST" });
-    if (!response.ok) throw new Error("simulation command failed");
-    liveSnapshot = await response.json();
-    panels = liveSnapshot.panels.map(panel => isolated.has(panel.id) ? isolate(panel) : panel);
-    apiAvailable = true;
-    panels.forEach(panel => { updateTile(panel); scene?.update(panel); });
-    log(`Simulation ${scenario ?? "advanced one minute"}`);
-    renderOverview();
-    navigate("analytics");
-  } catch { $("#simulation-feedback")?.replaceChildren("Scenario could not run. Check the local simulator connection."); }
-}
-
-async function startLifecycle() {
-  const button = $("#start-chart-simulation");
-  if (button) button.disabled = true;
-  try {
-    const response = await fetch("/api/lifecycle/start", { method: "POST" });
-    if (!response.ok) throw new Error("lifecycle start failed");
-    liveSnapshot = await response.json();
-    panels = liveSnapshot.panels.map(panel => isolated.has(panel.id) ? isolate(panel) : panel);
-    apiAvailable = true;
-    panels.forEach(panel => { updateTile(panel); scene?.update(panel); });
-    log("Started 1-minute simulated lifecycle");
-    renderOverview();
-    simulationView = true;
-    if (page === "analytics") {
-      $("#chart-feedback").textContent = "";
-      $("#subpage .analysis").outerHTML = renderAnalytics();
-      updateChartView();
-      $("#simulation-view").scrollIntoView({ block: "nearest" });
-    }
-  } catch {
-    $("#chart-feedback")?.replaceChildren("Simulation could not start. Check the local simulator connection.");
-    updateChartView();
-  }
-}
-
-function history(days) {
-  const values = Array.from({ length: days }, (_, index) => curve.map(value => value * (1 - index * .065))).flat();
-  return `${spark(values, `Illustrative generation trend across ${days} days`, "#a44525")}<div class="chart-caption"><span>${days === 1 ? "06:00" : `${days} days ago`}</span><span>Demo snapshot</span></div>`;
+function startReplayTimer() {
+  clearInterval(replayTimer);
+  replayTimer = setInterval(() => {
+    if (replayIndex >= (recordedHistory?.minutes.length ?? 0) - 1) { clearInterval(replayTimer); replayTimer = null; replayPlaying = false; return; }
+    replayIndex++;
+    void showReplay();
+  }, replayInterval(replaySpeed));
 }
 
 function renderActivity() {
@@ -460,16 +381,16 @@ function renderPanel() {
   $("#panel-title").textContent = panel.id;
   $("#panel-content").innerHTML = `
     <div class="detail-meta"><span>Row ${panel.row} · Column ${panel.col}</span>${badge(panel.status)}</div>
-    <div class="diagnosis ${panel.status}"><small>${panel.fault ? "IMPORTED FAULT STATUS" : "DEMO DIAGNOSTIC"}</small><h3>${issue(panel)}</h3>
+    <div class="diagnosis ${panel.status}"><small>${panel.fault ? "IMPORTED FAULT STATUS" : "SAMPLE STATUS"}</small><h3>${issue(panel)}</h3>
     <p>${panel.fault ? "Status from the imported CSV." : panel.status === "critical" ? "Possible cause: surface soiling or partial shading. Inspect the module to confirm."
       : panel.status === "warning" ? "Compare production with nearby modules under similar conditions."
       : panel.status === "offline" ? "The latest sample and recent readings are unavailable."
       : panel.status === "isolated" ? "Output was set to zero in this session. The sample history is preserved."
       : "The latest sample does not show an active anomaly."}</p></div>
-    <h3>Displayed sample <small>${liveSnapshot ? new Date(liveSnapshot.generatedAt).toLocaleString("en-GB", { timeZone: "Europe/Istanbul" }) + " TRT" : "Demo"}</small></h3>
+    <h3>Displayed sample <small>${liveSnapshot ? new Date(liveSnapshot.generatedAt).toLocaleString("en-GB", { timeZone: "Europe/Istanbul" }) + " TRT" : "Unavailable"}</small></h3>
     <dl class="detail-readings"><div><dt>Output</dt><dd>${reading(panel.power, "W")}</dd></div><div><dt>Temperature</dt><dd>${reading(panel.temperature, "°C")}</dd></div><div><dt>DC voltage</dt><dd>${reading(panel.voltage, "V")}</dd></div><div><dt>DC current</dt><dd>${reading(panel.current ?? null, "A")}</dd></div></dl>
     ${panel.fault ? `<p class="context">Ambient temperature: ${reading(panel.ambient, "°C")} · Illuminance: ${reading(panel.lux, "lux")}</p>`
-      : '<p class="context">Field context · simulated telemetry</p>'}
+      : '<p class="context">Recorded field context unavailable.</p>'}
     ${liveSnapshot?.collection?.imported ? '<details id="panel-history"><summary>Recent recorded readings</summary><p class="context" id="panel-history-content">Open to load the latest 30 readings.</p></details>' : ''}
     <h3>Maintenance note</h3>
     <p id="saved-note" class="context">${note ? "" : "No note saved."}</p>
@@ -542,41 +463,27 @@ function refresh() {
 document.addEventListener("click", async event => {
   const button = event.target.closest("button");
   if (!button) return;
-  const { panel, open, page: target, range } = button.dataset;
+  const { panel, open, page: target } = button.dataset;
   if (panel !== undefined) openPanel(Number(panel));
   if (target || open) navigate(target || open);
   if (button.dataset.replayPlay) {
+    if (replayPlaying) return;
     clearInterval(replayTimer);
+    replayTimer = null;
+    if (!recordedHistory?.minutes.length) return;
+    replayPlaying = true;
     await showReplay();
-    replayTimer = setInterval(() => { if (replayIndex >= (recordedHistory?.minutes.length ?? 0) - 1) return clearInterval(replayTimer); replayIndex++; void showReplay(); }, 1500);
+    if (replayPlaying) startReplayTimer();
   }
-  if (button.dataset.replayPause) clearInterval(replayTimer);
-  if (button.dataset.replayLatest) { clearInterval(replayTimer); replayActive = false; replayRequest++; $("#map-replay-controls").hidden = true; await syncLiveData(); }
+  if (button.dataset.replayPause) { clearInterval(replayTimer); replayTimer = null; replayPlaying = false; }
+  if (button.dataset.replayLatest) { clearInterval(replayTimer); replayTimer = null; replayActive = false; replayPlaying = false; replayRequest++; $("#map-replay-controls").hidden = true; await syncLiveData(); }
   if (button.dataset.replayMap) navigate("map");
-  if (range) {
-    document.querySelectorAll("[data-range]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
-    $("#history-chart").innerHTML = history(Number(range));
-  }
   if (button.dataset.metric) {
     const metric = button.dataset.metric;
     widgetIds = widgetIds.includes(metric) ? widgetIds.filter(id => id !== metric) : [...widgetIds, metric];
     widgetIds = selectedMetrics(widgetIds);
     localStorage.setItem("heliofield-metrics", JSON.stringify(widgetIds));
     navigate("analytics");
-  }
-  if (button.dataset.scenario) await commandSimulation(button.dataset.scenario);
-  if (button.dataset.tick) await commandSimulation();
-  if (button.dataset.lifecycleStart) await startLifecycle();
-  if (button.dataset.chartView) {
-    simulationView = button.dataset.chartView === "simulation";
-    updateChartView();
-  }
-  if (button.dataset.collection) {
-    try {
-      const response = await fetch("/api/collection/view", { method: "POST" });
-      if (!response.ok) throw new Error("Collection view unavailable");
-      await syncLiveData();
-    } catch { $("#simulation-feedback")?.replaceChildren("Could not load the latest scheduled sample."); }
   }
 });
 function applyTheme(value) {

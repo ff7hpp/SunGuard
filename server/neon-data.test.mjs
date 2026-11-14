@@ -24,14 +24,20 @@ test('panel history accepts only valid array positions', () => {
   for (const value of ['0', '301', '1.5', '1 OR 1=1', '', null]) assert.equal(parsePanelNumber(value), null);
 });
 
-test('history uses actual dates and leaves unrecorded metrics empty', () => {
-  const data = historyFromRows([{ time: '2026-10-01T06:00:00.000Z', power: 1, temperature: 22, voltage: 6, current: .1, recorded: 300, available: 300, illuminance: 2756 }], [], '2026-10-01');
+test('history uses actual dates and shows only metrics available in the imported file', () => {
+  const data = historyFromRows([
+    { time: '2026-10-01T06:00:00.000Z', power: 1, temperature: 22, voltage: 6, current: .1, recorded: 300, available: 300, illuminance: 2756 },
+    { time: '2026-10-01T06:01:00.000Z', power: 2, temperature: 23, voltage: 7, current: .2, recorded: 300, available: 300, illuminance: 2800 },
+  ], [], '2026-10-01');
   assert.equal(data.minutes[0].minute, 540);
   assert.equal(data.minutes[0].power, 1);
   assert.equal(data.minutes[0].efficiency, null);
   assert.equal(data.imported, true);
   const html = renderHistory(data);
-  assert.equal((html.match(/class="paper history-card"/g) ?? []).length, 9);
-  assert.match(html, /Not recorded in the imported file/);
+  assert.equal((html.match(/class="paper history-card"/g) ?? []).length, 7);
+  assert.doesNotMatch(html, /Not recorded in the imported file/);
   assert.match(html, /Illuminance/);
+  const full = renderHistory(data);
+  const replayed = renderHistory(data, '2026-10-01T06:00:00.000Z');
+  assert.ok((full.match(/<circle/g) ?? []).length > (replayed.match(/<circle/g) ?? []).length);
 });

@@ -1,5 +1,11 @@
 # Development handoff
 
+## Current production check — 2026-11-14
+
+Production at `https://heliopulse-lilac.vercel.app` was serving commit `4236e0e` (Vercel deployment READY). `/api/health` reported Neon and `/api/snapshot` returned 300 panels with the last imported sample at `2026-10-07T14:29:00Z` (17:29 Istanbul), marked imported, collection inactive, and `simulationAvailable: false`. `/api/history?date=2026-10-01` returned historical data. These are recorded readings, not a live feed. The production API is GET-only; the SQLite simulation and scenario commands are served by the local server, not Vercel. The previous production 404 and incorrect-database observations below are historical and no longer describe this check. Actual incoming live telemetry would require an authenticated ingestion source, storage, and a running collection path; a hosted demo simulator is a separate implementation.
+
+The project build succeeded. `npm test` discovered tests in the untracked `Drive-original-2026-11-14` backup and failed on its broken esbuild package; test the project files separately until test discovery is scoped. The Vercel connector denied access to environment variable metadata (403); runtime results above establish the observed connection, not its configuration.
+
 ## Current integration
 
 Base: GitHub `main` commit `99d846e` (SunGuard telemetry dashboard and CSV import). The `integration/multidevice-20261114` branch combines that frontend with locally developed Neon schema, transactional CSV import, historical APIs, and panel history. A backup of the pre-integration workspace was made under the user's Local AppData directory.

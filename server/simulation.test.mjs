@@ -63,7 +63,7 @@ test("a lifecycle run advances through persisted fault and recovery events", () 
     assert.ok(snapshot.lifecycle.series[2].power < snapshot.lifecycle.series[1].power);
     assert.equal(snapshot.lifecycle.series[2].warning, 1);
     assert.notEqual(snapshot.lifecycle.series[1].frequency, snapshot.lifecycle.series[2].frequency);
-    assert.equal((renderSimulationCharts(snapshot.lifecycle).match(/class="paper history-card"/g) ?? []).length, 9);
+    assert.equal((renderSimulationCharts(snapshot.lifecycle).match(/class="paper history-card"/g) ?? []).length, 7);
     assert.match(renderSimulationCharts(snapshot.lifecycle), /Stage 3 of 15/);
     assert.equal(simulation.history().days.reduce((total, day) => total + day.samples, 0), 0);
   });

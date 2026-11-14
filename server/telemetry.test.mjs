@@ -6,7 +6,7 @@ import { RealTelemetryProvider } from "./telemetry.mjs";
 import { renderHistory } from "../history-charts.mjs";
 import { metricCatalog } from "../live-client.mjs";
 
-test("history API serves seven Istanbul dates and refreshes all nine charts after ingestion", async () => {
+test("history API serves seven Istanbul dates and refreshes all supported charts after ingestion", async () => {
   let clock = new Date("2026-11-13T06:02:15Z");
   const runtime = createServer({ databasePath: ":memory:", now: () => clock, seedHistory: true, tickMs: 10 });
   const { port } = await runtime.listen(0);
@@ -39,7 +39,7 @@ test("history API serves seven Istanbul dates and refreshes all nine charts afte
     const weeklyCharts = renderHistory(week);
     assert.equal((weeklyCharts.match(/class="history-area"/g) ?? []).length, 7);
     assert.equal((weeklyCharts.match(/class="history-heat-row"/g) ?? []).length, 7);
-    assert.match(weeklyCharts, /history-gauge/);
+    assert.doesNotMatch(weeklyCharts, /history-gauge/);
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/history?date=2026-11-06`)).status, 400);
   } finally { await runtime.close(); }
 });

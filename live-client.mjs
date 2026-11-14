@@ -5,11 +5,9 @@ export const metricCatalog = [
   { id: "temperature", label: "Panel temperature", unit: "°C", level: "Panel / farm" },
   { id: "voltage", label: "DC voltage", unit: "V", level: "Panel" },
   { id: "current", label: "DC current", unit: "A", level: "Panel" },
-  { id: "efficiency", label: "Efficiency", unit: "%", level: "Panel / zone" },
-  { id: "irradiance", label: "Irradiance", unit: "W/m²", level: "Site" },
-  { id: "frequency", label: "AC frequency", unit: "Hz", level: "Inverter / site" },
+  { id: "illuminance", label: "Illuminance", unit: "lux", level: "Panel / site" },
   { id: "availability", label: "Availability", unit: "%", level: "Farm" },
-  { id: "alerts", label: "Anomaly risk", unit: "alerts", level: "Analytics" },
+  { id: "alerts", label: "Recorded alerts", unit: "alerts", level: "Analytics" },
 ];
 
 export function selectedMetrics(candidate) {
