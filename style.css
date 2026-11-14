@@ -360,3 +360,43 @@ h1 { font-size: clamp(36px, 4vw, 62px); }
   .history-card { min-height: 220px; padding: 14px; }
   .history-plot { min-height: 180px; }
 }
+
+/* Shared spacing for navigation, content and replay controls. */
+.sidebar { width: 220px; padding: 28px 18px; }
+.brand { min-height: 46px; padding: 0 6px; gap: 12px; }
+.sidebar nav { display: grid; gap: 6px; margin-top: 30px; }
+.sidebar nav button { min-height: 46px; margin: 0; padding: 11px 12px; gap: 12px; font-size: 13px; }
+main { width: auto; max-width: 1588px; margin: 0 auto 0 220px; padding: 0 32px 48px; }
+.topbar { height: 72px; }
+.intro { margin: 32px 0 24px; gap: 24px; }
+.paper { color-scheme: inherit; }
+.metrics { gap: 16px; margin-top: 16px; }
+.metric { padding: 20px; }
+.metric p { line-height: 1.5; margin-top: 6px; }
+.alert-section { margin-top: 16px; padding: 22px; }
+.event-row { padding: 14px 4px; gap: 14px; }
+.analysis, .history { padding: 26px; }
+.analysis + .history { margin-top: 20px; }
+.analysis-grid { gap: 16px; margin: 20px 0; }
+.history-grid { gap: 18px; margin-top: 16px; }
+.history-card { padding: 20px; }
+.context { line-height: 1.6; }
+#map-replay-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 24px 0 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+#map-replay-controls strong { margin-right: 8px; }
+#map-replay-controls > button { display: inline-flex; align-items: center; justify-content: center; margin: 0; min-height: 38px; padding: 8px 14px; }
+#map-replay-status { margin-left: auto; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+@media (max-width: 950px) {
+  .sidebar { width: 180px; padding-inline: 14px; }
+  main { width: auto; margin-left: 180px; padding: 0 22px 36px; }
+}
+@media (max-width: 690px) {
+  .sidebar { width: 100%; padding: 14px 16px; }
+  .sidebar nav { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+  .sidebar nav button { width: auto; min-height: 38px; padding: 8px 10px; gap: 6px; }
+  main { margin: 0; padding: 0 16px 32px; }
+  .topbar { height: 56px; }
+  .intro { margin: 24px 0 18px; }
+  .analysis, .history { padding: 18px; }
+  .metric { padding: 16px; }
+  #map-replay-status { flex-basis: 100%; margin-left: 0; }
+}

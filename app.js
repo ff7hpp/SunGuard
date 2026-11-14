@@ -162,15 +162,15 @@ function alertRows(alerts) {
 function navigate(next) {
   page = next;
   const button = $(`[data-page="${next}"]`);
-  const title = { overview: "Overview", map: "Solar map", analytics: "Analytics", alerts: "Alerts", activity: "Activity log" }[next];
+  const title = { overview: "Overview", analytics: "Analytics", alerts: "Alerts", activity: "Activity log" }[next];
   document.querySelectorAll("[data-page]").forEach(item => item.removeAttribute("aria-current"));
   button.setAttribute("aria-current", "page");
-  const primary = next === "overview" || next === "map";
+  const primary = next === "overview";
   $("#primary").hidden = !primary;
-  $("#metrics").hidden = $("#overview-alerts").hidden = next === "map";
+  $("#metrics").hidden = $("#overview-alerts").hidden = false;
   $("#subpage").hidden = primary;
   if (primary) {
-    $("#title").textContent = next === "map" ? "Solar map" : "Farm overview";
+    $("#title").textContent = "Farm overview";
     $("#title").focus({ preventScroll: true });
   } else {
     const body = next === "analytics" ? renderAnalytics()
@@ -477,7 +477,7 @@ document.addEventListener("click", async event => {
   }
   if (button.dataset.replayPause) { clearInterval(replayTimer); replayTimer = null; replayPlaying = false; }
   if (button.dataset.replayLatest) { clearInterval(replayTimer); replayTimer = null; replayActive = false; replayPlaying = false; replayRequest++; $("#map-replay-controls").hidden = true; await syncLiveData(); }
-  if (button.dataset.replayMap) navigate("map");
+  if (button.dataset.replayMap) { navigate("overview"); $(".viewer").scrollIntoView({ block: "start" }); }
   if (button.dataset.metric) {
     const metric = button.dataset.metric;
     widgetIds = widgetIds.includes(metric) ? widgetIds.filter(id => id !== metric) : [...widgetIds, metric];
