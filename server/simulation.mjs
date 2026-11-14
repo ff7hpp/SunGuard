@@ -163,6 +163,7 @@ export function createSimulation({ databasePath, now = () => new Date(), provide
     collectionStatus() { return telemetry.status(); },
     seedHistory() { telemetry.seed(); },
     history(date) { return telemetry.history(date); },
+    panelHistory(panel) { return { panel, timezone: 'Europe/Istanbul', readings: telemetry.panelHistory(panel) }; },
     ingest(batch) { return telemetry.ingest(batch); },
     showCollection() {
       if (!lifecycleActive) {

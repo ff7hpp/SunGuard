@@ -85,8 +85,8 @@ const mean = values => {
   return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
 };
 
-export function createTelemetry(db, now, provider) {
-  db.exec(`
+export function createTelemetry(db, now, provider, { readOnly = false } = {}) {
+  if (!readOnly) db.exec(`
     CREATE TABLE IF NOT EXISTS telemetry_minutes (
       source TEXT NOT NULL, time TEXT NOT NULL, quality TEXT NOT NULL,
       irradiance REAL, frequency REAL, PRIMARY KEY(source, time)
@@ -205,6 +205,11 @@ export function createTelemetry(db, now, provider) {
       return latest.get(source, now().toISOString());
     },
     panels(time) { return readPanels.all(source, time); },
+    panelHistory(panel) {
+      return db.prepare(`SELECT p.time, p.power, p.temperature, p.voltage, p.current, d.fault
+        FROM telemetry_panels p JOIN csv_panel_details d ON d.time=p.time AND d.panel=p.panel
+        WHERE p.source='real' AND p.panel=? ORDER BY p.time DESC LIMIT 30`).all(panel - 1);
+    },
     status() {
       const row = this.latest();
       const window = collectionWindow(now());

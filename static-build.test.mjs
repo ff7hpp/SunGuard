@@ -22,6 +22,6 @@ test("production build creates one deployable static directory", async () => {
 
 test("Vercel deploys the production static directory", () => {
   const config = JSON.parse(readFileSync(new URL("./vercel.json", import.meta.url), "utf8"));
-  assert.equal(config.buildCommand, "npm run build");
+  assert.equal(config.buildCommand, "npm run setup");
   assert.equal(config.outputDirectory, "dist");
 });

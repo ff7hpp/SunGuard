@@ -1,4 +1,7 @@
 {
-  "buildCommand": "npm run build",
+  "buildCommand": "npm run setup",
+  "functions": {
+    "api/[...route].js": { "includeFiles": "data/sunguard.db" }
+  },
   "outputDirectory": "dist"
 }
