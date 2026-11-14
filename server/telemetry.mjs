@@ -148,10 +148,13 @@ export function createTelemetry(db, now, provider, { readOnly = false } = {}) {
     LEFT JOIN csv_panel_details d ON m.source='real' AND d.time=p.time AND d.panel=p.panel
     WHERE m.source=? AND m.time>=? AND m.time<=? GROUP BY m.time ORDER BY m.time`);
   const faults = db.prepare(`
-    SELECT p.time, p.panel, p.status FROM telemetry_panels p
+    SELECT p.time, p.panel, p.status, d.fault FROM telemetry_panels p
+    LEFT JOIN csv_panel_details d ON p.source='real' AND d.time=p.time AND d.panel=p.panel
     WHERE p.source=? AND p.time>=? AND p.time<=? AND p.status IN ('warning','critical','offline')
       AND NOT EXISTS (
-        SELECT 1 FROM telemetry_panels prev WHERE prev.source=p.source AND prev.panel=p.panel
+        SELECT 1 FROM telemetry_panels prev
+        LEFT JOIN csv_panel_details previous ON prev.source='real' AND previous.time=prev.time AND previous.panel=prev.panel
+        WHERE prev.source=p.source AND prev.panel=p.panel AND previous.fault IS d.fault
         AND prev.time=strftime('%Y-%m-%dT%H:%M:%fZ',p.time,'-1 minute') AND prev.status=p.status
       ) ORDER BY p.time,p.panel`);
 

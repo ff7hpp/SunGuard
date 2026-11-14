@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { replaySummary, replayInterval } from './replay.mjs';
+import { analysisPeriod, replaySummary, replayInterval } from './replay.mjs';
+
+test('half-hour analysis excludes later and previous-window readings', () => {
+  const minutes = [569, 570, 571, 600].map(minute => ({ minute, date: '2026-10-05', time: String(minute) }));
+  const data = { minutes, incidents: minutes.map(({time}) => ({time})) };
+  assert.equal(analysisPeriod(data, 2).minutes.length, 3);
+  assert.deepEqual(analysisPeriod(data, 2, 30), { minutes: minutes.slice(1, 3), incidents: data.incidents.slice(1, 3) });
+});
 
 test('playback speed maps recorded minutes to elapsed real time', () => {
   assert.deepEqual([1, 5, 10, 50, 100].map(replayInterval), [60000, 12000, 6000, 1200, 600]);
