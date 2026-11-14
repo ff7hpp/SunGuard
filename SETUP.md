@@ -1,11 +1,65 @@
-# Setup
+# تشغيل SunGuard محلياً
 
-1. Clone `https://github.com/ff7hpp/SunGuard.git` and check out the required integration branch.
-2. Use Node.js 26. Run `npm ci`, then `npm run setup`, then `npm run simulate`. Open `http://127.0.0.1:4173/`. Setup imports the bundled compressed CSV into local SQLite; each computer has its own database. Do not set `DATABASE_URL` or `SUNGUARD_DATABASE_URL` in the shell when using local SQLite.
-3. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to the pooled Neon connection. `DATABASE_URL_UNPOOLED` is used only for migration and import. Never commit either file or a connection string.
-4. Run `npm run simulate` and open `http://127.0.0.1:4173/`. With `DATABASE_URL`, historical endpoints use Neon; simulation controls operate separately in local SQLite. Without it, the existing simulator operates locally.
-5. Run `npm test` and `npm run build` before committing.
+## المتطلبات
 
-For an empty, explicitly selected database only, run `npm run neon:migrate`. To import an authorized CSV, run `npm run neon:import -- <path-to-csv>`. Verify its source and timezone first. The CSV is not part of the repository. Do not rerun imports merely to check the data; use read-only queries.
+- Git
+- Node.js 26 أو أحدث
+- اتصال إنترنت أول مرة فقط لتنزيل الحزم
 
-Vercel uses the server-side `SUNGUARD_DATABASE_URL` when set, falling back to `DATABASE_URL`. The SunGuard-specific variable avoids overriding Neon-managed variables; set it for each verified target environment. Push an integration branch and verify a preview's frontend and API against the intended Neon branch before merging or deploying production. A successful Git push does not confirm deployment or environment configuration.
+لا تحتاج إلى Neon أو Vercel أو أي ملف أسرار. قاعدة البيانات SQLite محلية لكل جهاز، وملف البيانات التاريخية المضغوط موجود داخل المستودع.
+
+## macOS
+
+افتح **Terminal** ثم الصق الأوامر التالية:
+
+```bash
+git clone https://github.com/ff7hpp/SunGuard.git
+cd SunGuard
+node --version
+npm ci
+npm run setup
+npm run simulate
+```
+
+بعد ظهور رسالة أن الخادم يعمل، افتح:
+
+```
+http://127.0.0.1:4173/
+```
+
+`npm run setup` ينشئ `data/sunguard.db` ويستورد الأيام السبعة المسجلة من الملف المضمّن `dataset/SunGuard7days.csv.gz`. لا تُرفع قاعدة البيانات المحلية إلى Git، ولا حاجة لنسخها من جهاز آخر.
+
+## Windows
+
+في PowerShell داخل مجلد المشروع:
+
+```powershell
+npm ci
+npm run setup
+npm run simulate
+```
+
+ثم افتح `http://127.0.0.1:4173/`.
+
+## فحص سريع
+
+قبل التشغيل أو بعد أي سحب جديد:
+
+```bash
+npm test
+```
+
+لإيقاف الخادم: اضغط `Ctrl + C` في نافذة Terminal.
+
+## تحديث المشروع لاحقاً
+
+من داخل مجلد `SunGuard`:
+
+```bash
+git pull origin main
+npm ci
+npm run setup
+npm run simulate
+```
+
+تشغيل `setup` بعد التحديث آمن؛ يعيد إعداد SQLite المحلية من البيانات المضمّنة.
