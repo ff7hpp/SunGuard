@@ -64,7 +64,9 @@ export function createServer({ databasePath = resolve(projectDirectory, "data", 
         const at = url.searchParams.get("at");
         if (at && (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/.test(at) || !Number.isFinite(Date.parse(at)))) return sendJson(response, 400, { error: "Invalid timestamp" });
         if (remote && (!simulationPreview || at)) { const snapshot = await (await remote).snapshot(at); if (snapshot) return sendJson(response, 200, { ...snapshot, simulationAvailable: true }); if (at) return sendJson(response, 404, { error: "No reading at this time" }); }
-        return sendJson(response, 200, simulation.snapshot());
+        if (at && !simulation.collectionStatus().imported) return sendJson(response, 404, { error: "Imported reading unavailable" });
+        const localSnapshot = simulation.snapshot(at);
+        return localSnapshot ? sendJson(response, 200, localSnapshot) : sendJson(response, 404, { error: "No reading at this time" });
       }
       if (request.method === "GET" && url.pathname === "/api/collection-status") return sendJson(response, 200, simulation.collectionStatus());
       if (request.method === "GET" && url.pathname === "/api/panel-history") {

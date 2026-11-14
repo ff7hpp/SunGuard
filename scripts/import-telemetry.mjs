@@ -1,4 +1,5 @@
 import { createReadStream } from "node:fs";
+import { createGunzip } from "node:zlib";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -30,7 +31,8 @@ try {
   const existing = db.prepare(`SELECT power, temperature, voltage, current, status, lux, ambient, fault
     FROM telemetry_panels JOIN csv_panel_details USING(time,panel) WHERE source='real' AND time=? AND panel=?`);
   const seen = new Map();
-  for await (const line of createInterface({ input: createReadStream(path), crlfDelay: Infinity })) {
+  const input = createReadStream(path);
+  for await (const line of createInterface({ input: path.endsWith('.gz') ? input.pipe(createGunzip()) : input, crlfDelay: Infinity })) {
     row++;
     if (row === 1) {
       if (line.replace(/^\uFEFF/, "") !== columns) throw new Error("Unexpected CSV header");

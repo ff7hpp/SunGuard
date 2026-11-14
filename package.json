@@ -5,7 +5,8 @@
   "scripts": {
     "build": "node --env-file-if-exists=.env.local scripts/build.mjs",
     "test": "node --test",
-    "simulate": "npm run build && node --env-file-if-exists=.env.local server/server.mjs",
+    "simulate": "npm run build && node server/server.mjs",
+    "setup": "node scripts/setup-local.mjs",
     "neon:migrate": "node --env-file-if-exists=.env.local scripts/neon-migrate.mjs",
     "neon:import": "node --env-file-if-exists=.env.local scripts/neon-import.mjs"
   },

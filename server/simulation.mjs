@@ -188,8 +188,10 @@ export function createSimulation({ databasePath, now = () => new Date(), provide
       this.tick();
       return this.snapshot();
     },
-    snapshot() {
+    snapshot(at) {
       const collection = this.collectionStatus();
+      if (at && !telemetry.panels(at).length) return null;
+      if (at) collection.latestSample = at;
       const useScheduled = !preview && Boolean(collection.latestSample);
       const stored = useScheduled ? new Map(telemetry.panels(collection.latestSample).map(row => [row.panel, row])) : null;
       const panels = stored ? Array.from({ length: PANEL_COUNT }, (_, index) => {

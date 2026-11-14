@@ -1,7 +1,7 @@
 # Setup
 
 1. Clone `https://github.com/ff7hpp/SunGuard.git` and check out the required integration branch.
-2. Use Node.js 26 (the application uses `node:sqlite`; Vercel currently specifies Node 26). Run `npm ci`.
+2. Use Node.js 26. Run `npm ci`, then `npm run setup`, then `npm run simulate`. Open `http://127.0.0.1:4173/`. Setup imports the bundled compressed CSV into local SQLite; each computer has its own database. Do not set `DATABASE_URL` or `SUNGUARD_DATABASE_URL` in the shell when using local SQLite.
 3. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to the pooled Neon connection. `DATABASE_URL_UNPOOLED` is used only for migration and import. Never commit either file or a connection string.
 4. Run `npm run simulate` and open `http://127.0.0.1:4173/`. With `DATABASE_URL`, historical endpoints use Neon; simulation controls operate separately in local SQLite. Without it, the existing simulator operates locally.
 5. Run `npm test` and `npm run build` before committing.
